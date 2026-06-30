@@ -226,14 +226,19 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
     if current_wallpaper and os.path.exists(current_wallpaper):
         wallpaper_preview.content = ft.Image(
             src=current_wallpaper,
-            fit=ft.ImageFit.COVER,
+            fit=ft.BoxFit.COVER,
             border_radius=ft.BorderRadius(10, 10, 10, 10),
         )
         wallpaper_preview.bgcolor = None
 
-    def on_file_pick(e: ft.FilePickerResultEvent):
-        if e.files and len(e.files) > 0:
-            path = e.files[0].path
+    async def choose_wallpaper(e):
+        files = await file_picker.pick_files(
+            dialog_title="Choisir un fond d'ecran",
+            file_type=ft.FilePickerFileType.CUSTOM,
+            allowed_extensions=["png", "jpg", "jpeg", "webp"],
+        )
+        if files:
+            path = files[0].path
             if path:
                 db.set_wallpaper(uid, path)
                 def close(ev):
@@ -248,9 +253,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
         dlg = Diag.success_dialog(page, message="Fond d'ecran supprime.", on_ok=close)
         navigate("/settings")
 
-    file_picker = ft.FilePicker(on_result=on_file_pick)
-    if file_picker not in page.overlay:
-        page.overlay.append(file_picker)
+    file_picker = ft.FilePicker()
 
     wallpaper_section = _section(
         "Fond d'ecran",
@@ -263,10 +266,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
                     ft.ElevatedButton(
                         "Choisir une image",
                         icon=ft.Icons.IMAGE,
-                        on_click=lambda e: file_picker.pick_files(
-                            allowed_extensions=["png", "jpg", "jpeg", "webp"],
-                            dialog_title="Choisir un fond d'ecran",
-                        ),
+                        on_click=choose_wallpaper,
                         expand=True,
                         style=ft.ButtonStyle(
                             bgcolor=C_PRIMARY, color=ft.Colors.WHITE,
@@ -369,6 +369,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
         route="/settings",
         bgcolor=C_BG,
         scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         appbar=ft.AppBar(
             title=ft.Text("Parametres", weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
             bgcolor=C_PRIMARY,

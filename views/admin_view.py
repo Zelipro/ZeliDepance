@@ -17,7 +17,7 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
     user = session["user"]
 
     users_list = ft.Column(spacing=10)
-    stats_row = ft.Row(spacing=10, wrap=True)
+    stats_row = ft.Row(spacing=10)
 
     def _stat_card(label, value, icon, color):
         return ft.Card(
@@ -245,6 +245,7 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
         route="/admin",
         bgcolor=C_BG,
         scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         appbar=ft.AppBar(
             title=ft.Text("Administration", weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
             bgcolor=C_ADMIN,

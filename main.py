@@ -25,10 +25,10 @@ def main(page: ft.Page) -> None:
         page.views.clear()
         route = page.route
 
-        if not session["user"] or route in ("/", "/login"):
-            page.views.append(build_login_view(page, session, navigate))
-        elif route == "/register":
+        if route == "/register":
             page.views.append(build_register_view(page, session, navigate))
+        elif not session["user"] or route in ("/", "/login"):
+            page.views.append(build_login_view(page, session, navigate))
         elif route == "/expenses":
             page.views.append(build_expenses_view(page, session, navigate))
         elif route == "/admin":

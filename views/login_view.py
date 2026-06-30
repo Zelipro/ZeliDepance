@@ -56,17 +56,19 @@ def build_login_view(page: ft.Page, session: dict, navigate) -> ft.View:
         bgcolor=C_BG,
         padding=0,
         scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         controls=[
             ft.Column(
                 spacing=0,
                 expand=True,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[
                     # Header degrade vert
                     ft.Container(
                         padding=ft.padding.symmetric(vertical=48, horizontal=24),
                         gradient=ft.LinearGradient(
-                            begin=ft.alignment.top_center,
-                            end=ft.alignment.bottom_center,
+                            begin=ft.Alignment.TOP_CENTER,
+                            end=ft.Alignment.BOTTOM_CENTER,
                             colors=[C_DARK, C_PRIMARY],
                         ),
                         content=ft.Column(

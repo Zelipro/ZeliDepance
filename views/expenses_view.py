@@ -179,6 +179,10 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
         has_pin = db.has_section_pin(uid)
         unlocked = session.get("section_unlocked", True)
 
+        lock_toggle_btn.icon = ft.Icons.LOCK_OPEN if unlocked else ft.Icons.LOCK
+        lock_toggle_btn.icon_color = C_PRIMARY if unlocked else "#F57C00"
+        lock_toggle_btn.visible = has_pin
+
         if has_pin and not unlocked:
             list_area.content = ft.Container(
                 padding=32,
@@ -359,6 +363,14 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
     # ── Section verrou (visible seulement si PIN configure) ─────────────────
 
     has_pin = db.has_section_pin(uid)
+    lock_toggle_btn = ft.IconButton(
+        icon=ft.Icons.LOCK_OPEN if session.get("section_unlocked", True) else ft.Icons.LOCK,
+        icon_color=C_PRIMARY if session.get("section_unlocked", True) else "#F57C00",
+        icon_size=20,
+        tooltip="Verrouiller / Deverrouiller",
+        visible=has_pin,
+        on_click=toggle_lock,
+    )
     lock_section_header = ft.Row(
         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         controls=[
@@ -366,14 +378,7 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
             ft.Row(
                 spacing=4,
                 controls=[
-                    ft.IconButton(
-                        icon=ft.Icons.LOCK_OPEN if session.get("section_unlocked", True) else ft.Icons.LOCK,
-                        icon_color=C_PRIMARY if session.get("section_unlocked", True) else "#F57C00",
-                        icon_size=20,
-                        tooltip="Verrouiller / Deverrouiller",
-                        visible=has_pin,
-                        on_click=toggle_lock,
-                    ),
+                    lock_toggle_btn,
                     ft.IconButton(
                         icon=ft.Icons.REFRESH,
                         icon_color=C_MUTED,
@@ -399,8 +404,8 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
             border_radius=14,
             padding=ft.padding.symmetric(horizontal=20, vertical=18),
             gradient=ft.LinearGradient(
-                begin=ft.alignment.top_left,
-                end=ft.alignment.bottom_right,
+                begin=ft.Alignment.TOP_LEFT,
+                end=ft.Alignment.BOTTOM_RIGHT,
                 colors=[C_PRIMARY, C_DARK],
             ),
             content=ft.Row(
@@ -509,7 +514,7 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
             controls=[
                 ft.Container(
                     expand=True,
-                    image=ft.DecorationImage(src=wallpaper, fit=ft.ImageFit.COVER, opacity=0.18),
+                    image=ft.DecorationImage(src=wallpaper, fit=ft.BoxFit.COVER, opacity=0.18),
                     bgcolor=C_BG,
                 ),
                 ft.Container(
@@ -531,6 +536,7 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
         route="/expenses",
         bgcolor=C_BG,
         scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         appbar=ft.AppBar(
             title=ft.Text(
                 f"ZeliDepense  —  {user['nom']}",

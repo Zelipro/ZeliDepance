@@ -97,6 +97,7 @@ def build_register_view(page: ft.Page, session: dict, navigate) -> ft.View:
         route="/register",
         bgcolor=C_BG,
         scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         appbar=ft.AppBar(
             title=ft.Text("Creer un compte", weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
             bgcolor=C_PRIMARY,
