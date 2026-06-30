@@ -63,7 +63,7 @@ def error_dialog(page: ft.Page, title: str = "Erreur", message: str = ""):
         ],
         actions_alignment=ft.MainAxisAlignment.END,
     )
-    _show(page, dlg)
+    return _show(page, dlg)
 
 
 def success_dialog(
@@ -102,7 +102,7 @@ def success_dialog(
         ],
         actions_alignment=ft.MainAxisAlignment.END,
     )
-    _show(page, dlg)
+    return _show(page, dlg)
 
 
 def ask_dialog(
