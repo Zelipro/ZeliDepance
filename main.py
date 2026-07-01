@@ -1,4 +1,3 @@
-import asyncio
 import os
 
 import flet as ft
@@ -61,11 +60,7 @@ async def main(page: ft.Page) -> None:
     page.on_view_pop = view_pop
     page.go("/login")
 
-    if supabase_sync.is_configured():
-        async def _startup_sync():
-            await asyncio.to_thread(supabase_sync.pull_and_merge)
-
-        page.run_task(_startup_sync)
+    supabase_sync.run_in_background(page)
 
 
 if __name__ == "__main__":

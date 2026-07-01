@@ -1,9 +1,6 @@
-import datetime
 import hashlib
-import os
 import secrets
 import sqlite3
-import uuid as uuidlib
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -20,14 +17,6 @@ def set_db_path(path: str) -> None:
 
 def get_connection() -> sqlite3.Connection:
     return sqlite3.connect(DB_NAME)
-
-
-def _now() -> str:
-    return datetime.datetime.now().isoformat(timespec="seconds")
-
-
-def _new_uuid() -> str:
-    return str(uuidlib.uuid4())
 
 
 def _hash(password: str, salt: str = None) -> tuple:
@@ -96,35 +85,20 @@ def init_db() -> None:
             cur.execute("ALTER TABLE depenses ADD COLUMN user_id INTEGER REFERENCES users(id)")
             conn.commit()
 
-        # Migration: colonnes de synchronisation Supabase
-        for col_sql in ("uuid TEXT", "updated_at TEXT", "deleted INTEGER DEFAULT 0"):
-            col_name = col_sql.split()[0]
-            if col_name not in cols:
-                cur.execute(f"ALTER TABLE depenses ADD COLUMN {col_sql}")
+        # Migration: colonnes de synchronisation Supabase (meme principe que Version-3)
+        # synced : 0 = a envoyer, 1 = a jour, 2 = a supprimer sur le cloud
+        if "synced" not in cols:
+            cur.execute("ALTER TABLE depenses ADD COLUMN synced INTEGER DEFAULT 0")
+        if "supabase_id" not in cols:
+            cur.execute("ALTER TABLE depenses ADD COLUMN supabase_id INTEGER DEFAULT NULL")
         conn.commit()
 
         cur.execute("PRAGMA table_info(users)")
         user_cols = [r[1] for r in cur.fetchall()]
-        for col_sql in ("uuid TEXT", "updated_at TEXT", "deleted INTEGER DEFAULT 0"):
-            col_name = col_sql.split()[0]
-            if col_name not in user_cols:
-                cur.execute(f"ALTER TABLE users ADD COLUMN {col_sql}")
-        conn.commit()
-
-        cur.execute("PRAGMA table_info(user_preferences)")
-        pref_cols = [r[1] for r in cur.fetchall()]
-        if "updated_at" not in pref_cols:
-            cur.execute("ALTER TABLE user_preferences ADD COLUMN updated_at TEXT")
-            conn.commit()
-
-        # Backfill des uuid manquants (comptes/depenses crees avant la sync)
-        now = _now()
-        cur.execute("SELECT id FROM users WHERE uuid IS NULL")
-        for (uid,) in cur.fetchall():
-            cur.execute("UPDATE users SET uuid = ?, updated_at = ? WHERE id = ?", (_new_uuid(), now, uid))
-        cur.execute("SELECT id FROM depenses WHERE uuid IS NULL")
-        for (did,) in cur.fetchall():
-            cur.execute("UPDATE depenses SET uuid = ?, updated_at = ? WHERE id = ?", (_new_uuid(), now, did))
+        if "synced" not in user_cols:
+            cur.execute("ALTER TABLE users ADD COLUMN synced INTEGER DEFAULT 0")
+        if "supabase_id" not in user_cols:
+            cur.execute("ALTER TABLE users ADD COLUMN supabase_id INTEGER DEFAULT NULL")
         conn.commit()
 
         # Creer le compte admin si inexistant
@@ -133,9 +107,8 @@ def init_db() -> None:
         if not admin:
             h, s = _hash("Deg")
             cur.execute(
-                "INSERT INTO users (uuid, username, nom, password_hash, salt, role, is_approved, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (_new_uuid(), "Deg", "Deg", h, s, "admin", 1, now),
+                "INSERT INTO users (username, nom, password_hash, salt, role, is_approved) VALUES (?, ?, ?, ?, ?, ?)",
+                ("Deg", "Deg", h, s, "admin", 1),
             )
             admin_id = cur.lastrowid
             cur.execute("UPDATE depenses SET user_id = ? WHERE user_id IS NULL", (admin_id,))
@@ -144,7 +117,7 @@ def init_db() -> None:
             # Migre les comptes crees avec l'ancien mot de passe par defaut
             if _verify("Deg@2024", admin_hash, admin_salt):
                 h, s = _hash("Deg")
-                cur.execute("UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?", (h, s, now, admin_id))
+                cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (h, s, admin_id))
             cur.execute("UPDATE depenses SET user_id = ? WHERE user_id IS NULL", (admin_id,))
 
         conn.commit()
@@ -159,18 +132,14 @@ def create_user(username: str, nom: str, password: str) -> tuple:
         return False, "Ce nom d'utilisateur est deja pris (compte existant en ligne)."
 
     h, s = _hash(password)
-    now = _now()
     try:
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "INSERT INTO users (uuid, username, nom, password_hash, salt, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (_new_uuid(), username, nom, h, s, now),
+                "INSERT INTO users (username, nom, password_hash, salt) VALUES (?, ?, ?, ?)",
+                (username, nom, h, s),
             )
             conn.commit()
-            new_id = cur.lastrowid
-        supabase_sync.push_user(new_id)
         return True, "Compte cree. En attente d'approbation par l'administrateur."
     except sqlite3.IntegrityError:
         return False, "Ce nom d'utilisateur est deja pris."
@@ -182,7 +151,7 @@ def authenticate(username: str, password: str) -> dict:
             cur = conn.cursor()
             cur.execute(
                 "SELECT id, username, nom, password_hash, salt, role, is_approved FROM users "
-                "WHERE username = ? AND (deleted IS NULL OR deleted = 0)",
+                "WHERE username = ? AND synced != 2",
                 (username,),
             )
             return cur.fetchone()
@@ -190,8 +159,8 @@ def authenticate(username: str, password: str) -> dict:
     row = _lookup()
     if not row:
         import supabase_sync
-        if supabase_sync.is_configured():
-            supabase_sync.pull_and_merge()
+        if supabase_sync.is_online():
+            supabase_sync.first_launch_restore()
             row = _lookup()
 
     if not row:
@@ -207,7 +176,7 @@ def get_all_users() -> list:
         cur = conn.cursor()
         cur.execute(
             "SELECT id, username, nom, role, is_approved, created_at FROM users "
-            "WHERE deleted IS NULL OR deleted = 0 "
+            "WHERE synced != 2 "
             "ORDER BY is_approved ASC, created_at DESC"
         )
         return [
@@ -218,25 +187,40 @@ def get_all_users() -> list:
 
 
 def approve_user(user_id: int, approved: bool) -> None:
-    now = _now()
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("UPDATE users SET is_approved = ?, updated_at = ? WHERE id = ?", (1 if approved else 0, now, user_id))
+        cur.execute(
+            "UPDATE users SET is_approved = ?, synced = 0 WHERE id = ?",
+            (1 if approved else 0, user_id),
+        )
         conn.commit()
-    import supabase_sync
-    supabase_sync.push_user(user_id)
 
 
 def delete_user(user_id: int) -> None:
-    now = _now()
+    """
+    Supprime un utilisateur et ses depenses :
+    - Si jamais synchronise (supabase_id NULL) -> suppression directe
+    - Sinon -> marque synced=2 (sera supprime sur Supabase a la prochaine sync)
+    """
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("UPDATE user_preferences SET updated_at = ? WHERE user_id = ?", (now, user_id))
-        cur.execute("UPDATE depenses SET deleted = 1, updated_at = ? WHERE user_id = ?", (now, user_id))
-        cur.execute("UPDATE users SET deleted = 1, updated_at = ? WHERE id = ?", (now, user_id))
+        cur.execute("SELECT supabase_id FROM users WHERE id = ?", (user_id,))
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            cur.execute("UPDATE users SET synced = 2 WHERE id = ?", (user_id,))
+            cur.execute(
+                "UPDATE depenses SET synced = 2 WHERE user_id = ? AND supabase_id IS NOT NULL",
+                (user_id,),
+            )
+            cur.execute(
+                "DELETE FROM depenses WHERE user_id = ? AND supabase_id IS NULL",
+                (user_id,),
+            )
+        else:
+            cur.execute("DELETE FROM depenses WHERE user_id = ?", (user_id,))
+            cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        cur.execute("DELETE FROM user_preferences WHERE user_id = ?", (user_id,))
         conn.commit()
-    import supabase_sync
-    supabase_sync.push_user(user_id)
 
 
 def change_password(user_id: int, old_password: str, new_password: str) -> tuple:
@@ -247,41 +231,32 @@ def change_password(user_id: int, old_password: str, new_password: str) -> tuple
     if not row or not _verify(old_password, row[0], row[1]):
         return False, "Mot de passe actuel incorrect."
     h, s = _hash(new_password)
-    now = _now()
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?", (h, s, now, user_id))
+        cur.execute("UPDATE users SET password_hash = ?, salt = ?, synced = 0 WHERE id = ?", (h, s, user_id))
         conn.commit()
-    import supabase_sync
-    supabase_sync.push_user(user_id)
     return True, "Mot de passe modifie avec succes."
 
 
 def set_section_pin(user_id: int, pin: str) -> None:
     h, s = _hash(pin)
-    now = _now()
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "UPDATE users SET section_pin_hash = ?, section_pin_salt = ?, updated_at = ? WHERE id = ?",
-            (h, s, now, user_id),
+            "UPDATE users SET section_pin_hash = ?, section_pin_salt = ?, synced = 0 WHERE id = ?",
+            (h, s, user_id),
         )
         conn.commit()
-    import supabase_sync
-    supabase_sync.push_user(user_id)
 
 
 def remove_section_pin(user_id: int) -> None:
-    now = _now()
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "UPDATE users SET section_pin_hash = NULL, section_pin_salt = NULL, updated_at = ? WHERE id = ?",
-            (now, user_id),
+            "UPDATE users SET section_pin_hash = NULL, section_pin_salt = NULL, synced = 0 WHERE id = ?",
+            (user_id,),
         )
         conn.commit()
-    import supabase_sync
-    supabase_sync.push_user(user_id)
 
 
 def verify_section_pin(user_id: int, pin: str) -> bool:
@@ -311,34 +286,27 @@ def get_wallpaper(user_id: int) -> str:
 
 
 def set_wallpaper(user_id: int, path: str) -> None:
-    now = _now()
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO user_preferences (user_id, wallpaper_path, updated_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(user_id) DO UPDATE SET wallpaper_path = ?, updated_at = ?",
-            (user_id, path, now, path, now),
+            "INSERT INTO user_preferences (user_id, wallpaper_path) VALUES (?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET wallpaper_path = ?",
+            (user_id, path, path),
         )
         conn.commit()
-    import supabase_sync
-    supabase_sync.push_preferences(user_id)
 
 
 # ── Operations sur les depenses ──────────────────────────────────────────────
 
 def add_depense(description: str, montant: float, categorie: str, date: str, user_id: int = None) -> None:
-    now = _now()
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO depenses (uuid, description, montant, categorie, date, user_id, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (_new_uuid(), description, montant, categorie, date, user_id, now),
+            "INSERT INTO depenses (description, montant, categorie, date, user_id, synced) "
+            "VALUES (?, ?, ?, ?, ?, 0)",
+            (description, montant, categorie, date, user_id),
         )
         conn.commit()
-        new_id = cur.lastrowid
-    import supabase_sync
-    supabase_sync.push_depense(new_id)
 
 
 def get_depenses(user_id: int = None) -> list:
@@ -347,38 +315,42 @@ def get_depenses(user_id: int = None) -> list:
         if user_id is not None:
             rows = cur.execute(
                 "SELECT id, description, montant, categorie, date FROM depenses "
-                "WHERE user_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY id DESC",
+                "WHERE user_id = ? AND synced != 2 ORDER BY id DESC",
                 (user_id,),
             ).fetchall()
         else:
             rows = cur.execute(
                 "SELECT id, description, montant, categorie, date FROM depenses "
-                "WHERE deleted IS NULL OR deleted = 0 ORDER BY id DESC"
+                "WHERE synced != 2 ORDER BY id DESC"
             ).fetchall()
     return rows
 
 
 def update_depense(depense_id: int, description: str, montant: float, categorie: str, date: str) -> None:
-    now = _now()
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "UPDATE depenses SET description = ?, montant = ?, categorie = ?, date = ?, updated_at = ? WHERE id = ?",
-            (description, montant, categorie, date, now, depense_id),
+            "UPDATE depenses SET description = ?, montant = ?, categorie = ?, date = ?, synced = 0 WHERE id = ?",
+            (description, montant, categorie, date, depense_id),
         )
         conn.commit()
-    import supabase_sync
-    supabase_sync.push_depense(depense_id)
 
 
 def delete_depense(depense_id: int) -> None:
-    now = _now()
+    """
+    Supprime une depense :
+    - Si jamais synchronisee -> suppression directe
+    - Sinon -> marquee synced=2 (sera supprimee sur Supabase a la sync)
+    """
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("UPDATE depenses SET deleted = 1, updated_at = ? WHERE id = ?", (now, depense_id))
+        cur.execute("SELECT supabase_id FROM depenses WHERE id = ?", (depense_id,))
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            cur.execute("UPDATE depenses SET synced = 2 WHERE id = ?", (depense_id,))
+        else:
+            cur.execute("DELETE FROM depenses WHERE id = ?", (depense_id,))
         conn.commit()
-    import supabase_sync
-    supabase_sync.push_depense(depense_id)
 
 
 def calcul_total(user_id: int = None) -> float:
@@ -386,12 +358,11 @@ def calcul_total(user_id: int = None) -> float:
         cur = conn.cursor()
         if user_id is not None:
             cur.execute(
-                "SELECT COALESCE(SUM(montant), 0) FROM depenses "
-                "WHERE user_id = ? AND (deleted IS NULL OR deleted = 0)",
+                "SELECT COALESCE(SUM(montant), 0) FROM depenses WHERE user_id = ? AND synced != 2",
                 (user_id,),
             )
         else:
-            cur.execute("SELECT COALESCE(SUM(montant), 0) FROM depenses WHERE deleted IS NULL OR deleted = 0")
+            cur.execute("SELECT COALESCE(SUM(montant), 0) FROM depenses WHERE synced != 2")
         result = cur.fetchone()
     return float(result[0]) if result else 0.0
 
@@ -401,11 +372,11 @@ def get_depenses_count(user_id: int = None) -> int:
         cur = conn.cursor()
         if user_id is not None:
             cur.execute(
-                "SELECT COUNT(*) FROM depenses WHERE user_id = ? AND (deleted IS NULL OR deleted = 0)",
+                "SELECT COUNT(*) FROM depenses WHERE user_id = ? AND synced != 2",
                 (user_id,),
             )
         else:
-            cur.execute("SELECT COUNT(*) FROM depenses WHERE deleted IS NULL OR deleted = 0")
+            cur.execute("SELECT COUNT(*) FROM depenses WHERE synced != 2")
         result = cur.fetchone()
     return result[0] if result else 0
 

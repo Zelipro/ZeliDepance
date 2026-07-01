@@ -226,15 +226,12 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
     sync_busy = ft.ProgressRing(width=16, height=16, stroke_width=2, visible=False)
 
     def _refresh_sync_status():
-        if not supabase_sync.is_configured():
+        if supabase_sync.is_configured():
+            sync_status_text.value = "Configure — la synchronisation se fait au demarrage et via ce bouton."
+            sync_status_text.color = C_PRIMARY
+        else:
             sync_status_text.value = "Non configure — renseignez l'URL et la cle ci-dessus."
             sync_status_text.color = C_WARNING
-        else:
-            last = supabase_sync.get_last_sync()
-            sync_status_text.value = (
-                f"Configure — derniere synchro : {last}" if last else "Configure — jamais synchronise."
-            )
-            sync_status_text.color = C_PRIMARY
 
     async def test_connection_click(e):
         sync_busy.visible = True
@@ -269,25 +266,26 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
             return
         sync_busy.visible = True
         page.update()
-        result = await asyncio.to_thread(supabase_sync.sync_now)
+        result = await asyncio.to_thread(supabase_sync.full_sync)
         sync_busy.visible = False
-        _refresh_sync_status()
         page.update()
         refresh()
 
         def close(ev):
             Diag.close_dialog(page, dlg)
 
-        if result.get("error"):
+        if not result.get("online"):
+            dlg = Diag.error_dialog(page, message="Aucune connexion internet detectee.")
+        elif result.get("error"):
             dlg = Diag.error_dialog(page, message=f"Echec de la synchronisation : {result['error']}")
         else:
             dlg = Diag.success_dialog(
                 page,
                 message=(
                     "Synchronisation reussie.\n"
-                    f"Envoye : {result['sent_users']} compte(s), {result['sent_depenses']} depense(s).\n"
-                    f"Recupere : {result['new_users']} nouveau(x) compte(s), "
-                    f"{result['new_depenses']} nouvelle(s) depense(s)."
+                    f"Recupere : {result['restored_users']} compte(s), "
+                    f"{result['restored_depenses']} depense(s).\n"
+                    f"Envoye : {result['users']} compte(s), {result['depenses']} depense(s)."
                 ),
                 on_ok=close,
             )
