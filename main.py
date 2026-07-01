@@ -1,8 +1,10 @@
+import asyncio
 import os
 
 import flet as ft
 
 import database as db
+import supabase_sync
 from views.login_view import build_login_view
 from views.register_view import build_register_view
 from views.expenses_view import build_expenses_view
@@ -58,6 +60,12 @@ async def main(page: ft.Page) -> None:
     page.on_route_change = route_change
     page.on_view_pop = view_pop
     page.go("/login")
+
+    if supabase_sync.is_configured():
+        async def _startup_sync():
+            await asyncio.to_thread(supabase_sync.pull_and_merge)
+
+        page.run_task(_startup_sync)
 
 
 if __name__ == "__main__":

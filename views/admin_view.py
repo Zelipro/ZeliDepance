@@ -1,6 +1,9 @@
+import asyncio
+
 import flet as ft
 import database as db
 import Dialog as Diag
+import supabase_sync
 
 C_PRIMARY = "#2E7D32"
 C_DARK = "#1B5E20"
@@ -200,6 +203,97 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
             on_non=cancel,
         )
 
+    # ── Synchronisation cloud (Supabase) ────────────────────────────────
+
+    _existing_url, _existing_key = supabase_sync.get_config()
+
+    sync_url_field = ft.TextField(
+        label="URL du projet Supabase",
+        value=_existing_url or "",
+        hint_text="https://xxxxxxxxxxxx.supabase.co",
+        prefix_icon=ft.Icons.LINK,
+        border_radius=10,
+    )
+    sync_key_field = ft.TextField(
+        label="Cle API (anon / public)",
+        value=_existing_key or "",
+        password=True,
+        can_reveal_password=True,
+        prefix_icon=ft.Icons.VPN_KEY_OUTLINED,
+        border_radius=10,
+    )
+    sync_status_text = ft.Text("", size=12, color=C_MUTED)
+    sync_busy = ft.ProgressRing(width=16, height=16, stroke_width=2, visible=False)
+
+    def _refresh_sync_status():
+        if not supabase_sync.is_configured():
+            sync_status_text.value = "Non configure — renseignez l'URL et la cle ci-dessus."
+            sync_status_text.color = C_WARNING
+        else:
+            last = supabase_sync.get_last_sync()
+            sync_status_text.value = (
+                f"Configure — derniere synchro : {last}" if last else "Configure — jamais synchronise."
+            )
+            sync_status_text.color = C_PRIMARY
+
+    async def test_connection_click(e):
+        sync_busy.visible = True
+        page.update()
+        ok, msg = await asyncio.to_thread(
+            supabase_sync.test_connection, sync_url_field.value.strip(), sync_key_field.value.strip()
+        )
+        sync_busy.visible = False
+        page.update()
+
+        def close(ev):
+            Diag.close_dialog(page, dlg)
+
+        if ok:
+            dlg = Diag.success_dialog(page, message=msg, on_ok=close)
+        else:
+            dlg = Diag.error_dialog(page, message=msg)
+
+    async def save_config_click(e):
+        supabase_sync.set_config(sync_url_field.value.strip(), sync_key_field.value.strip())
+        _refresh_sync_status()
+        page.update()
+
+        def close(ev):
+            Diag.close_dialog(page, dlg)
+
+        dlg = Diag.success_dialog(page, message="Configuration Supabase enregistree.", on_ok=close)
+
+    async def sync_now_click(e):
+        if not supabase_sync.is_configured():
+            Diag.error_dialog(page, message="Renseignez et enregistrez d'abord l'URL et la cle Supabase.")
+            return
+        sync_busy.visible = True
+        page.update()
+        result = await asyncio.to_thread(supabase_sync.sync_now)
+        sync_busy.visible = False
+        _refresh_sync_status()
+        page.update()
+        refresh()
+
+        def close(ev):
+            Diag.close_dialog(page, dlg)
+
+        if result.get("error"):
+            dlg = Diag.error_dialog(page, message=f"Echec de la synchronisation : {result['error']}")
+        else:
+            dlg = Diag.success_dialog(
+                page,
+                message=(
+                    "Synchronisation reussie.\n"
+                    f"Envoye : {result['sent_users']} compte(s), {result['sent_depenses']} depense(s).\n"
+                    f"Recupere : {result['new_users']} nouveau(x) compte(s), "
+                    f"{result['new_depenses']} nouvelle(s) depense(s)."
+                ),
+                on_ok=close,
+            )
+
+    _refresh_sync_status()
+
     def refresh():
         all_users = db.get_all_users()
         total_users = len(all_users)
@@ -292,6 +386,64 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
                             ],
                         ),
                         users_list,
+                        ft.Divider(color="#E0E0E0"),
+                        ft.Row(
+                            spacing=8,
+                            controls=[
+                                ft.Icon(ft.Icons.CLOUD_SYNC_OUTLINED, color=C_ADMIN, size=20),
+                                ft.Text("Synchronisation cloud (Supabase)", size=16, weight=ft.FontWeight.BOLD, color=C_TEXT),
+                            ],
+                        ),
+                        ft.Card(
+                            elevation=2,
+                            content=ft.Container(
+                                bgcolor=C_SURFACE,
+                                border_radius=12,
+                                padding=16,
+                                content=ft.Column(
+                                    spacing=12,
+                                    controls=[
+                                        sync_url_field,
+                                        sync_key_field,
+                                        ft.Row(spacing=8, controls=[sync_status_text, sync_busy]),
+                                        ft.Row(
+                                            spacing=10,
+                                            controls=[
+                                                ft.OutlinedButton(
+                                                    "Tester",
+                                                    icon=ft.Icons.NETWORK_CHECK,
+                                                    on_click=test_connection_click,
+                                                    style=ft.ButtonStyle(
+                                                        color=C_ADMIN,
+                                                        side=ft.BorderSide(1, C_ADMIN),
+                                                        shape=ft.RoundedRectangleBorder(radius=10),
+                                                    ),
+                                                ),
+                                                ft.ElevatedButton(
+                                                    "Enregistrer",
+                                                    icon=ft.Icons.SAVE,
+                                                    on_click=save_config_click,
+                                                    style=ft.ButtonStyle(
+                                                        bgcolor=C_ADMIN, color=ft.Colors.WHITE,
+                                                        shape=ft.RoundedRectangleBorder(radius=10),
+                                                    ),
+                                                ),
+                                                ft.ElevatedButton(
+                                                    "Synchroniser maintenant",
+                                                    icon=ft.Icons.SYNC,
+                                                    on_click=sync_now_click,
+                                                    expand=True,
+                                                    style=ft.ButtonStyle(
+                                                        bgcolor=C_PRIMARY, color=ft.Colors.WHITE,
+                                                        shape=ft.RoundedRectangleBorder(radius=10),
+                                                    ),
+                                                ),
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                            ),
+                        ),
                     ],
                 ),
             )
