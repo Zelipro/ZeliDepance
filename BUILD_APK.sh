@@ -10,8 +10,8 @@
 
 set -e
 
-# ── Nom de l'application (détecté automatiquement depuis le dossier) ────────
-APP_NAME=$(basename "$PWD")
+# ── Nom de l'application (fixe) ─────────────────────────────────────────────
+APP_NAME="ZeliDepance_V2"
 
 # ── Bannière ────────────────────────────────────────────────────────────────
 echo ""
@@ -27,14 +27,13 @@ echo "║                                                              ║"
 echo "║          ✦  Applications De Zeli  ✦                         ║"
 echo "║                                                              ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
-echo "║   🔨  Build APK  →  $APP_NAME"
+echo "║   🔨  Build APK  →  $APP_NAME                        ║"
 echo "║   🔐  Mode      →  Storage Permissions activées             ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
 # ── Vérification de flet ─────────────────────────────────────────────────────
 if ! command -v flet &> /dev/null; then
-    # Essai avec ~/.local/bin
     if [ -f "$HOME/.local/bin/flet" ]; then
         export PATH="$HOME/.local/bin:$PATH"
         echo "✅ flet trouvé dans ~/.local/bin — PATH mis à jour."
@@ -64,7 +63,7 @@ echo "┌───────────────────────�
 echo "│  ÉTAPE 1/3 — Premier build APK                              │"
 echo "└─────────────────────────────────────────────────────────────┘"
 
-flet build apk 2>&1 || {
+flet build apk --project "$APP_NAME" 2>&1 || {
     echo ""
     echo "❌ Erreur lors du premier build."
     echo "   Vérifiez que Flutter SDK est installé : flutter doctor"
@@ -81,7 +80,6 @@ if [ "$SKIP_PATCH" = false ]; then
     echo "│  ÉTAPE 2/3 — Injection des permissions de stockage          │"
     echo "└─────────────────────────────────────────────────────────────┘"
 
-    # Chercher automatiquement le bon AndroidManifest
     MANIFEST_PATH="build/flutter/android/app/src/main/AndroidManifest.xml"
 
     if [ ! -f "$MANIFEST_PATH" ]; then
@@ -98,11 +96,9 @@ if [ "$SKIP_PATCH" = false ]; then
 
     echo "   📄 Manifest trouvé : $MANIFEST_PATH"
 
-    # Sauvegarde
     cp "$MANIFEST_PATH" "${MANIFEST_PATH}.backup"
     echo "   💾 Backup créé."
 
-    # Injection
     cp android_patch/AndroidManifest.xml "$MANIFEST_PATH"
     echo ""
     echo "✅ Permissions de stockage injectées avec succès."
@@ -117,7 +113,7 @@ echo "┌───────────────────────�
 echo "│  ÉTAPE 3/3 — Rebuild final                                  │"
 echo "└─────────────────────────────────────────────────────────────┘"
 
-flet build apk 2>&1 || {
+flet build apk --project "$APP_NAME" 2>&1 || {
     echo ""
     echo "❌ Erreur lors du rebuild final."
     exit 1
@@ -150,7 +146,7 @@ if [ -n "$APK_FILE" ]; then
     echo "║   1. Copiez l'APK sur votre téléphone                       ║"
     echo "║   2. Installez l'APK (autoriser sources inconnues)          ║"
     echo "║   3. NE PAS lancer tout de suite                            ║"
-    echo "║   4. Paramètres → Applications → $APP_NAME"
+    echo "║   4. Paramètres → Applications → $APP_NAME          ║"
     echo "║   5. Permissions → Stockage → Autoriser                     ║"
     echo "║   6. Android 11+ : aussi Accès à tous les fichiers          ║"
     echo "║   7. Lancez l'application ✅                                 ║"
