@@ -1,3 +1,5 @@
+import os
+
 import flet as ft
 
 import database as db
@@ -8,7 +10,12 @@ from views.admin_view import build_admin_view
 from views.settings_view import build_settings_view
 
 
-def main(page: ft.Page) -> None:
+async def main(page: ft.Page) -> None:
+    if page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS):
+        storage = ft.StoragePaths()
+        docs_dir = await storage.get_application_documents_directory()
+        db.set_db_path(os.path.join(docs_dir, db.DB_NAME))
+
     db.init_db()
 
     page.title = "ZeliDepense"

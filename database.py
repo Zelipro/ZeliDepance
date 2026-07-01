@@ -11,6 +11,11 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 DB_NAME = "depenses.db"
 
 
+def set_db_path(path: str) -> None:
+    global DB_NAME
+    DB_NAME = path
+
+
 def get_connection() -> sqlite3.Connection:
     return sqlite3.connect(DB_NAME)
 
@@ -75,10 +80,10 @@ def init_db() -> None:
             conn.commit()
 
         # Creer le compte admin si inexistant
-        cur.execute("SELECT id FROM users WHERE username = 'Deg'")
+        cur.execute("SELECT id, password_hash, salt FROM users WHERE username = 'Deg'")
         admin = cur.fetchone()
         if not admin:
-            h, s = _hash("Deg@2024")
+            h, s = _hash("Deg")
             cur.execute(
                 "INSERT INTO users (username, nom, password_hash, salt, role, is_approved) VALUES (?, ?, ?, ?, ?, ?)",
                 ("Deg", "Deg", h, s, "admin", 1),
@@ -86,7 +91,12 @@ def init_db() -> None:
             admin_id = cur.lastrowid
             cur.execute("UPDATE depenses SET user_id = ? WHERE user_id IS NULL", (admin_id,))
         else:
-            cur.execute("UPDATE depenses SET user_id = ? WHERE user_id IS NULL", (admin[0],))
+            admin_id, admin_hash, admin_salt = admin
+            # Migre les comptes crees avec l'ancien mot de passe par defaut
+            if _verify("Deg@2024", admin_hash, admin_salt):
+                h, s = _hash("Deg")
+                cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (h, s, admin_id))
+            cur.execute("UPDATE depenses SET user_id = ? WHERE user_id IS NULL", (admin_id,))
 
         conn.commit()
 

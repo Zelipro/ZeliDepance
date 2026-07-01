@@ -268,8 +268,16 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
 
         dlg = Diag.success_dialog(page, message=msg, on_ok=close)
 
-    def create_pdf(e):
-        pdf_path = os.path.join(os.getcwd(), f"rapport_{user['username']}.pdf")
+    async def create_pdf(e):
+        if page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS):
+            storage = ft.StoragePaths()
+            target_dir = await storage.get_downloads_directory()
+            if not target_dir:
+                target_dir = await storage.get_application_documents_directory()
+        else:
+            target_dir = os.getcwd()
+
+        pdf_path = os.path.join(target_dir, f"rapport_{user['username']}.pdf")
         db.generate_pdf(pdf_path, uid, user["nom"])
 
         def close(e):
@@ -334,7 +342,7 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
     # ── Wallpaper ─────────────────────────────────────────────────────
 
     wallpaper = db.get_wallpaper(uid)
-    use_wallpaper = wallpaper and os.path.exists(wallpaper)
+    use_wallpaper = bool(wallpaper)
 
     # ── Actions AppBar ────────────────────────────────────────────────
 
@@ -508,29 +516,16 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
         ],
     )
 
-    if use_wallpaper:
-        page_content = ft.Stack(
-            expand=True,
-            controls=[
-                ft.Container(
-                    expand=True,
-                    image=ft.DecorationImage(src=wallpaper, fit=ft.BoxFit.COVER, opacity=0.18),
-                    bgcolor=C_BG,
-                ),
-                ft.Container(
-                    expand=True,
-                    padding=ft.padding.symmetric(horizontal=14, vertical=12),
-                    content=main_column,
-                ),
-            ],
-        )
-    else:
-        page_content = ft.Container(
-            expand=True,
-            bgcolor=C_BG,
-            padding=ft.padding.symmetric(horizontal=14, vertical=12),
-            content=main_column,
-        )
+    page_content = ft.Container(
+        expand=True,
+        bgcolor=C_BG,
+        image=(
+            ft.DecorationImage(src=wallpaper, fit=ft.BoxFit.COVER, opacity=0.18)
+            if use_wallpaper else None
+        ),
+        padding=ft.padding.symmetric(horizontal=14, vertical=12),
+        content=main_column,
+    )
 
     return ft.View(
         route="/expenses",

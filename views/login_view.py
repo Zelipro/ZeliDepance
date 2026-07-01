@@ -132,28 +132,6 @@ def build_login_view(page: ft.Page, session: dict, navigate) -> ft.View:
                                         ),
                                     ],
                                 ),
-                                # Info admin
-                                ft.Container(
-                                    padding=12,
-                                    border_radius=10,
-                                    bgcolor="#E8F5E9",
-                                    border=ft.border.all(1, "#A5D6A7"),
-                                    content=ft.Column(
-                                        spacing=4,
-                                        controls=[
-                                            ft.Row(
-                                                spacing=6,
-                                                controls=[
-                                                    ft.Icon(ft.Icons.ADMIN_PANEL_SETTINGS, color=C_PRIMARY, size=16),
-                                                    ft.Text("Acces administrateur", weight=ft.FontWeight.W_600, color=C_DARK, size=13),
-                                                ],
-                                            ),
-                                            ft.Text("Identifiant : Deg", size=12, color="#424242"),
-                                            ft.Text("Mot de passe initial : Deg@2024", size=12, color="#424242"),
-                                            ft.Text("(Modifiez-le dans Parametres apres connexion)", size=11, color="#757575", italic=True),
-                                        ],
-                                    ),
-                                ),
                             ],
                         ),
                     ),

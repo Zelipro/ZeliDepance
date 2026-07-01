@@ -1,4 +1,4 @@
-import os
+import base64
 
 import flet as ft
 
@@ -223,7 +223,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
         ),
     )
 
-    if current_wallpaper and os.path.exists(current_wallpaper):
+    if current_wallpaper:
         wallpaper_preview.content = ft.Image(
             src=current_wallpaper,
             fit=ft.BoxFit.COVER,
@@ -236,15 +236,15 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
             dialog_title="Choisir un fond d'ecran",
             file_type=ft.FilePickerFileType.CUSTOM,
             allowed_extensions=["png", "jpg", "jpeg", "webp"],
+            with_data=True,
         )
-        if files:
-            path = files[0].path
-            if path:
-                db.set_wallpaper(uid, path)
-                def close(ev):
-                    Diag.close_dialog(page, dlg)
-                dlg = Diag.success_dialog(page, message="Fond d'ecran mis a jour.", on_ok=close)
-                navigate("/settings")
+        if files and files[0].bytes:
+            b64_data = base64.b64encode(files[0].bytes).decode("ascii")
+            db.set_wallpaper(uid, b64_data)
+            def close(ev):
+                Diag.close_dialog(page, dlg)
+            dlg = Diag.success_dialog(page, message="Fond d'ecran mis a jour.", on_ok=close)
+            navigate("/settings")
 
     def remove_wallpaper(e):
         db.set_wallpaper(uid, None)
