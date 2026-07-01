@@ -18,6 +18,11 @@ from supabase import create_client, Client
 
 import database as db
 
+# Version-3 possede deja une table "depenses" (colonnes liste_id, sans user_id)
+# dans ce meme projet Supabase. On utilise un nom distinct pour ne jamais
+# toucher a sa structure existante.
+DEPENSES_TABLE = "depenses_multiuser"
+
 
 # ── Configuration ─────────────────────────────────────────────────────────
 
@@ -76,6 +81,7 @@ def test_connection(url: str, api_key: str) -> tuple:
     try:
         client = create_client(url.strip().rstrip("/"), api_key.strip())
         client.table("users").select("id").limit(1).execute()
+        client.table(DEPENSES_TABLE).select("id").limit(1).execute()
         return True, "Connexion reussie."
     except Exception as e:
         return False, f"Impossible de joindre Supabase : {e}"
@@ -167,9 +173,9 @@ def sync_depenses(supabase: Client) -> int:
         }
         try:
             if supa_id is not None:
-                supabase.table("depenses").update(payload).eq("id", supa_id).execute()
+                supabase.table(DEPENSES_TABLE).update(payload).eq("id", supa_id).execute()
             else:
-                inserted = supabase.table("depenses").insert(payload).execute()
+                inserted = supabase.table(DEPENSES_TABLE).insert(payload).execute()
                 supa_id = inserted.data[0]["id"]
 
             with db.get_connection() as conn:
@@ -198,7 +204,7 @@ def sync_deletions(supabase: Client) -> int:
 
     for local_id, supa_id in depense_rows:
         try:
-            supabase.table("depenses").delete().eq("id", supa_id).execute()
+            supabase.table(DEPENSES_TABLE).delete().eq("id", supa_id).execute()
             with db.get_connection() as conn:
                 cur = conn.cursor()
                 cur.execute("DELETE FROM depenses WHERE id=? AND synced=2", (local_id,))
@@ -210,7 +216,7 @@ def sync_deletions(supabase: Client) -> int:
 
     for local_id, supa_id in user_rows:
         try:
-            supabase.table("depenses").delete().eq("user_id", supa_id).execute()
+            supabase.table(DEPENSES_TABLE).delete().eq("user_id", supa_id).execute()
             supabase.table("users").delete().eq("id", supa_id).execute()
             with db.get_connection() as conn:
                 cur = conn.cursor()
@@ -262,7 +268,7 @@ def restore_from_supabase(supabase: Client) -> dict:
             conn.commit()
             supa_to_local[u["id"]] = local_id
 
-        depenses = supabase.table("depenses").select("*").execute().data
+        depenses = supabase.table(DEPENSES_TABLE).select("*").execute().data
         for d in depenses:
             owner_id = supa_to_local.get(d["user_id"])
             if owner_id is None:
