@@ -5,6 +5,19 @@ Meme principe que la branche Version-3 : client supabase-py officiel,
 colonnes synced/supabase_id (0=a envoyer, 1=a jour, 2=a supprimer), sync
 lancee en arriere-plan au demarrage avec des SnackBars de statut.
 
+Le projet Supabase est PARTAGE avec l'application Version-3, qui possede
+deja les tables listes_depenses (id, nom, date_creation) et depenses
+(id, liste_id, description, montant, categorie, date). Leur structure ne
+doit jamais etre modifiee. Cette version multi-utilisateurs s'y adapte :
+
+  - chaque utilisateur de l'app correspond a une liste dont le nom est son
+    identifiant (creee automatiquement au premier envoi de depense) ;
+  - ses depenses sont stockees dans la table depenses existante via
+    liste_id, comme le fait Version-3 ;
+  - les listes historiques de Version-3 (dont le nom ne correspond a aucun
+    identifiant) sont importees comme depenses de l'administrateur (Deg) ;
+  - la table users (comptes) est la seule table propre a cette version.
+
 Contrairement a Version-3, l'URL et la cle du projet Supabase ne sont
 JAMAIS ecrites dans le code source : l'administrateur les saisit depuis
 le panneau Administration, elles sont stockees uniquement dans la base
@@ -13,15 +26,11 @@ GitHub.
 """
 
 import threading
+from datetime import datetime
 
 from supabase import create_client, Client
 
 import database as db
-
-# Version-3 possede deja une table "depenses" (colonnes liste_id, sans user_id)
-# dans ce meme projet Supabase. On utilise un nom distinct pour ne jamais
-# toucher a sa structure existante.
-DEPENSES_TABLE = "depenses_multiuser"
 
 
 # ── Configuration ─────────────────────────────────────────────────────────
@@ -81,7 +90,8 @@ def test_connection(url: str, api_key: str) -> tuple:
     try:
         client = create_client(url.strip().rstrip("/"), api_key.strip())
         client.table("users").select("id").limit(1).execute()
-        client.table(DEPENSES_TABLE).select("id").limit(1).execute()
+        client.table("listes_depenses").select("id").limit(1).execute()
+        client.table("depenses").select("id").limit(1).execute()
         return True, "Connexion reussie."
     except Exception as e:
         return False, f"Impossible de joindre Supabase : {e}"
@@ -150,32 +160,52 @@ def sync_users(supabase: Client) -> int:
 
 # ── Sync depenses ───────────────────────────────────────────────────────────
 
+def _get_or_create_liste_id(supabase: Client, username: str):
+    """Retourne l'id de la liste Version-3 portant le nom de l'utilisateur,
+    en la creant si necessaire (simple insertion de ligne, aucune modification
+    de structure)."""
+    res = supabase.table("listes_depenses").select("id").eq("nom", username).execute()
+    if res.data:
+        return res.data[0]["id"]
+    inserted = supabase.table("listes_depenses").insert({
+        "nom": username,
+        "date_creation": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }).execute()
+    return inserted.data[0]["id"]
+
+
 def sync_depenses(supabase: Client) -> int:
     """Pousse les depenses non encore synchronisees. Retourne le nombre traite."""
     count = 0
     with db.get_connection() as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT d.id, d.description, d.montant, d.categorie, d.date, d.supabase_id, u.supabase_id
+            SELECT d.id, d.description, d.montant, d.categorie, d.date, d.supabase_id,
+                   u.username, u.supabase_id
             FROM depenses d
             JOIN users u ON u.id = d.user_id
             WHERE d.synced = 0
         """)
         rows = cur.fetchall()
 
-    for (dep_id, description, montant, categorie, date, supa_id, supa_user_id) in rows:
+    liste_cache = {}
+    for (dep_id, description, montant, categorie, date, supa_id, username, supa_user_id) in rows:
         if supa_user_id is None:
             print(f"[SYNC] Depense '{description}' ignoree — utilisateur pas encore sync")
             continue
-        payload = {
-            "user_id": supa_user_id, "description": description, "montant": montant,
-            "categorie": categorie, "date": date,
-        }
         try:
             if supa_id is not None:
-                supabase.table(DEPENSES_TABLE).update(payload).eq("id", supa_id).execute()
+                # Mise a jour en place, sans toucher liste_id : une depense
+                # importee d'une liste historique Version-3 reste dans sa liste.
+                payload = {"description": description, "montant": montant,
+                           "categorie": categorie, "date": date}
+                supabase.table("depenses").update(payload).eq("id", supa_id).execute()
             else:
-                inserted = supabase.table(DEPENSES_TABLE).insert(payload).execute()
+                if username not in liste_cache:
+                    liste_cache[username] = _get_or_create_liste_id(supabase, username)
+                payload = {"liste_id": liste_cache[username], "description": description,
+                           "montant": montant, "categorie": categorie, "date": date}
+                inserted = supabase.table("depenses").insert(payload).execute()
                 supa_id = inserted.data[0]["id"]
 
             with db.get_connection() as conn:
@@ -199,12 +229,12 @@ def sync_deletions(supabase: Client) -> int:
         cur = conn.cursor()
         cur.execute("SELECT id, supabase_id FROM depenses WHERE synced = 2 AND supabase_id IS NOT NULL")
         depense_rows = cur.fetchall()
-        cur.execute("SELECT id, supabase_id FROM users WHERE synced = 2 AND supabase_id IS NOT NULL")
+        cur.execute("SELECT id, username, supabase_id FROM users WHERE synced = 2 AND supabase_id IS NOT NULL")
         user_rows = cur.fetchall()
 
     for local_id, supa_id in depense_rows:
         try:
-            supabase.table(DEPENSES_TABLE).delete().eq("id", supa_id).execute()
+            supabase.table("depenses").delete().eq("id", supa_id).execute()
             with db.get_connection() as conn:
                 cur = conn.cursor()
                 cur.execute("DELETE FROM depenses WHERE id=? AND synced=2", (local_id,))
@@ -214,9 +244,14 @@ def sync_deletions(supabase: Client) -> int:
         except Exception as e:
             print(f"[SYNC] Erreur suppression depense {supa_id}: {e}")
 
-    for local_id, supa_id in user_rows:
+    for local_id, username, supa_id in user_rows:
         try:
-            supabase.table(DEPENSES_TABLE).delete().eq("user_id", supa_id).execute()
+            # Supprime uniquement la liste portant le nom de l'utilisateur et
+            # ses depenses — jamais les listes historiques de Version-3.
+            res = supabase.table("listes_depenses").select("id").eq("nom", username).execute()
+            for liste in res.data:
+                supabase.table("depenses").delete().eq("liste_id", liste["id"]).execute()
+                supabase.table("listes_depenses").delete().eq("id", liste["id"]).execute()
             supabase.table("users").delete().eq("id", supa_id).execute()
             with db.get_connection() as conn:
                 cur = conn.cursor()
@@ -224,9 +259,9 @@ def sync_deletions(supabase: Client) -> int:
                 cur.execute("DELETE FROM users WHERE id=? AND synced=2", (local_id,))
                 conn.commit()
             count += 1
-            print(f"[SYNC] Utilisateur supabase_id={supa_id} supprime du cloud")
+            print(f"[SYNC] Utilisateur '{username}' supprime du cloud")
         except Exception as e:
-            print(f"[SYNC] Erreur suppression utilisateur {supa_id}: {e}")
+            print(f"[SYNC] Erreur suppression utilisateur '{username}': {e}")
 
     return count
 
@@ -238,21 +273,27 @@ def restore_from_supabase(supabase: Client) -> dict:
     result = {"users": 0, "depenses": 0}
     with db.get_connection() as conn:
         cur = conn.cursor()
-        supa_to_local = {}
+        local_id_by_username = {}
 
         users = supabase.table("users").select("*").execute().data
         for u in users:
-            cur.execute("SELECT id FROM users WHERE username=?", (u["username"],))
+            cur.execute("SELECT id, synced, supabase_id FROM users WHERE username=?", (u["username"],))
             existing = cur.fetchone()
             if existing:
-                local_id = existing[0]
-                cur.execute(
-                    "UPDATE users SET nom=?, password_hash=?, salt=?, role=?, is_approved=?, "
-                    "section_pin_hash=?, section_pin_salt=?, synced=1, supabase_id=? WHERE id=?",
-                    (u.get("nom"), u["password_hash"], u["salt"], u.get("role", "user"),
-                     u.get("is_approved", 0), u.get("section_pin_hash"), u.get("section_pin_salt"),
-                     u["id"], local_id),
-                )
+                local_id, local_synced, local_supa_id = existing
+                # N'ecrase l'etat local que s'il est propre (synced=1) ou jamais
+                # lie au cloud (supabase_id NULL). Un compte avec des changements
+                # locaux en attente (synced=0) ou marque pour suppression
+                # (synced=2) garde son etat : sync_users/sync_deletions le
+                # poussera juste apres.
+                if local_supa_id is None or local_synced == 1:
+                    cur.execute(
+                        "UPDATE users SET nom=?, password_hash=?, salt=?, role=?, is_approved=?, "
+                        "section_pin_hash=?, section_pin_salt=?, synced=1, supabase_id=? WHERE id=?",
+                        (u.get("nom"), u["password_hash"], u["salt"], u.get("role", "user"),
+                         u.get("is_approved", 0), u.get("section_pin_hash"), u.get("section_pin_salt"),
+                         u["id"], local_id),
+                    )
             else:
                 cur.execute(
                     "INSERT INTO users (username, nom, password_hash, salt, role, is_approved, "
@@ -266,11 +307,22 @@ def restore_from_supabase(supabase: Client) -> dict:
                 result["users"] += 1
                 print(f"[RESTORE] Utilisateur '{u['username']}' restaure")
             conn.commit()
-            supa_to_local[u["id"]] = local_id
+            local_id_by_username[u["username"]] = local_id
 
-        depenses = supabase.table(DEPENSES_TABLE).select("*").execute().data
+        # Les listes historiques de Version-3 (nom sans compte correspondant)
+        # sont rattachees a l'administrateur.
+        cur.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")
+        row = cur.fetchone()
+        admin_local_id = row[0] if row else None
+
+        listes = supabase.table("listes_depenses").select("*").execute().data
+        owner_by_liste = {}
+        for liste in listes:
+            owner_by_liste[liste["id"]] = local_id_by_username.get(liste.get("nom"), admin_local_id)
+
+        depenses = supabase.table("depenses").select("*").execute().data
         for d in depenses:
-            owner_id = supa_to_local.get(d["user_id"])
+            owner_id = owner_by_liste.get(d.get("liste_id"), admin_local_id)
             if owner_id is None:
                 continue
             cur.execute("SELECT id FROM depenses WHERE supabase_id=?", (d["id"],))
@@ -303,6 +355,18 @@ def first_launch_restore() -> dict:
     except Exception as e:
         print(f"[RESTORE] Erreur : {e}")
         return {"users": 0, "depenses": 0, "error": str(e)}
+
+
+def try_restore() -> None:
+    """Restauration silencieuse, meme si l'appareil est deja lie au cloud.
+    Utilisee quand un identifiant inconnu localement tente de se connecter
+    (compte cree sur un autre appareil)."""
+    if not is_online():
+        return
+    try:
+        restore_from_supabase(get_supabase())
+    except Exception as e:
+        print(f"[RESTORE] Erreur : {e}")
 
 
 # ── Fonction principale : lance toute la sync ────────────────────────────────

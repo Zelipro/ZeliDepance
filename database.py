@@ -156,19 +156,23 @@ def authenticate(username: str, password: str) -> dict:
             )
             return cur.fetchone()
 
-    row = _lookup()
-    if not row:
-        import supabase_sync
-        if supabase_sync.is_online():
-            supabase_sync.first_launch_restore()
-            row = _lookup()
-
-    if not row:
+    def _check(row):
+        if not row:
+            return None
+        uid, uname, nom, h, s, role, approved = row
+        if _verify(password, h, s):
+            return {"id": uid, "username": uname, "nom": nom, "role": role, "is_approved": approved}
         return None
-    uid, uname, nom, h, s, role, approved = row
-    if _verify(password, h, s):
-        return {"id": uid, "username": uname, "nom": nom, "role": role, "is_approved": approved}
-    return None
+
+    user = _check(_lookup())
+    if user is None:
+        # Compte inconnu localement ou mot de passe refuse : le compte a pu
+        # etre cree ou modifie sur un autre appareil — on rapatrie le cloud
+        # puis on reessaie une fois.
+        import supabase_sync
+        supabase_sync.try_restore()
+        user = _check(_lookup())
+    return user
 
 
 def get_all_users() -> list:
