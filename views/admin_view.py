@@ -284,8 +284,10 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
                 message=(
                     "Synchronisation reussie.\n"
                     f"Recupere : {result['restored_users']} compte(s), "
+                    f"{result['restored_listes']} liste(s), "
                     f"{result['restored_depenses']} depense(s).\n"
-                    f"Envoye : {result['users']} compte(s), {result['depenses']} depense(s)."
+                    f"Envoye : {result['users']} compte(s), {result['listes']} liste(s), "
+                    f"{result['depenses']} depense(s)."
                 ),
                 on_ok=close,
             )

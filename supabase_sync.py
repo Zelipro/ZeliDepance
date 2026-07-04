@@ -158,21 +158,74 @@ def sync_users(supabase: Client) -> int:
     return count
 
 
+# ── Sync listes ──────────────────────────────────────────────────────────────
+#
+# Les listes locales sont stockees dans la table listes_depenses existante de
+# Version-3 (id, nom UNIQUE, date_creation — structure intouchee). Le nom
+# distant encode le proprietaire :
+#   - listes de l'administrateur : nom tel quel (identiques a celles de
+#     Version-3, qui reste l'app de l'administrateur) ;
+#   - listes des autres utilisateurs : "identifiant::nom" pour garantir
+#     l'unicite et retrouver le proprietaire a la restauration.
+
+def _encode_liste_nom(nom: str, username: str, role: str) -> str:
+    return nom if role == "admin" else f"{username}::{nom}"
+
+
+def _decode_liste_nom(remote_nom: str, usernames: set) -> tuple:
+    """Retourne (username_proprietaire | None, nom_affiche).
+    None -> liste de l'administrateur (listes historiques Version-3 incluses)."""
+    if "::" in remote_nom:
+        prefix, rest = remote_nom.split("::", 1)
+        if prefix in usernames:
+            return prefix, rest
+    return None, remote_nom
+
+
+def sync_listes(supabase: Client) -> int:
+    """Pousse les listes non encore synchronisees. Retourne le nombre traite."""
+    count = 0
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT l.id, l.nom, l.date_creation, l.supabase_id,
+                   u.username, u.role, u.supabase_id
+            FROM listes l
+            JOIN users u ON u.id = l.user_id
+            WHERE l.synced = 0
+        """)
+        rows = cur.fetchall()
+
+    for (liste_id, nom, date_creation, supa_id, username, role, supa_user_id) in rows:
+        if supa_user_id is None:
+            print(f"[SYNC] Liste '{nom}' ignoree — utilisateur pas encore sync")
+            continue
+        remote_nom = _encode_liste_nom(nom, username, role)
+        try:
+            if supa_id is None:
+                existing = supabase.table("listes_depenses").select("id").eq("nom", remote_nom).execute()
+                if existing.data:
+                    supa_id = existing.data[0]["id"]
+                else:
+                    inserted = supabase.table("listes_depenses").insert({
+                        "nom": remote_nom,
+                        "date_creation": date_creation or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    }).execute()
+                    supa_id = inserted.data[0]["id"]
+
+            with db.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("UPDATE listes SET synced=1, supabase_id=? WHERE id=?", (supa_id, liste_id))
+                conn.commit()
+            count += 1
+            print(f"[SYNC] Liste '{nom}' synchronisee (supabase_id={supa_id})")
+        except Exception as e:
+            print(f"[SYNC] Erreur liste '{nom}': {e}")
+
+    return count
+
+
 # ── Sync depenses ───────────────────────────────────────────────────────────
-
-def _get_or_create_liste_id(supabase: Client, username: str):
-    """Retourne l'id de la liste Version-3 portant le nom de l'utilisateur,
-    en la creant si necessaire (simple insertion de ligne, aucune modification
-    de structure)."""
-    res = supabase.table("listes_depenses").select("id").eq("nom", username).execute()
-    if res.data:
-        return res.data[0]["id"]
-    inserted = supabase.table("listes_depenses").insert({
-        "nom": username,
-        "date_creation": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }).execute()
-    return inserted.data[0]["id"]
-
 
 def sync_depenses(supabase: Client) -> int:
     """Pousse les depenses non encore synchronisees. Retourne le nombre traite."""
@@ -181,29 +234,27 @@ def sync_depenses(supabase: Client) -> int:
         cur = conn.cursor()
         cur.execute("""
             SELECT d.id, d.description, d.montant, d.categorie, d.date, d.supabase_id,
-                   u.username, u.supabase_id
+                   l.supabase_id
             FROM depenses d
-            JOIN users u ON u.id = d.user_id
+            LEFT JOIN listes l ON l.id = d.liste_id
             WHERE d.synced = 0
         """)
         rows = cur.fetchall()
 
-    liste_cache = {}
-    for (dep_id, description, montant, categorie, date, supa_id, username, supa_user_id) in rows:
-        if supa_user_id is None:
-            print(f"[SYNC] Depense '{description}' ignoree — utilisateur pas encore sync")
-            continue
+    for (dep_id, description, montant, categorie, date, supa_id, supa_liste_id) in rows:
         try:
             if supa_id is not None:
                 # Mise a jour en place, sans toucher liste_id : une depense
-                # importee d'une liste historique Version-3 reste dans sa liste.
+                # reste dans sa liste d'origine (y compris les listes
+                # historiques de Version-3).
                 payload = {"description": description, "montant": montant,
                            "categorie": categorie, "date": date}
                 supabase.table("depenses").update(payload).eq("id", supa_id).execute()
             else:
-                if username not in liste_cache:
-                    liste_cache[username] = _get_or_create_liste_id(supabase, username)
-                payload = {"liste_id": liste_cache[username], "description": description,
+                if supa_liste_id is None:
+                    print(f"[SYNC] Depense '{description}' ignoree — liste pas encore sync")
+                    continue
+                payload = {"liste_id": supa_liste_id, "description": description,
                            "montant": montant, "categorie": categorie, "date": date}
                 inserted = supabase.table("depenses").insert(payload).execute()
                 supa_id = inserted.data[0]["id"]
@@ -229,6 +280,8 @@ def sync_deletions(supabase: Client) -> int:
         cur = conn.cursor()
         cur.execute("SELECT id, supabase_id FROM depenses WHERE synced = 2 AND supabase_id IS NOT NULL")
         depense_rows = cur.fetchall()
+        cur.execute("SELECT id, nom, supabase_id FROM listes WHERE synced = 2 AND supabase_id IS NOT NULL")
+        liste_rows = cur.fetchall()
         cur.execute("SELECT id, username, supabase_id FROM users WHERE synced = 2 AND supabase_id IS NOT NULL")
         user_rows = cur.fetchall()
 
@@ -244,18 +297,27 @@ def sync_deletions(supabase: Client) -> int:
         except Exception as e:
             print(f"[SYNC] Erreur suppression depense {supa_id}: {e}")
 
+    for local_id, nom, supa_id in liste_rows:
+        try:
+            supabase.table("depenses").delete().eq("liste_id", supa_id).execute()
+            supabase.table("listes_depenses").delete().eq("id", supa_id).execute()
+            with db.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM depenses WHERE liste_id=? AND synced=2", (local_id,))
+                cur.execute("DELETE FROM listes WHERE id=? AND synced=2", (local_id,))
+                conn.commit()
+            count += 1
+            print(f"[SYNC] Liste '{nom}' supprimee du cloud")
+        except Exception as e:
+            print(f"[SYNC] Erreur suppression liste '{nom}': {e}")
+
     for local_id, username, supa_id in user_rows:
         try:
-            # Supprime uniquement la liste portant le nom de l'utilisateur et
-            # ses depenses — jamais les listes historiques de Version-3.
-            res = supabase.table("listes_depenses").select("id").eq("nom", username).execute()
-            for liste in res.data:
-                supabase.table("depenses").delete().eq("liste_id", liste["id"]).execute()
-                supabase.table("listes_depenses").delete().eq("id", liste["id"]).execute()
             supabase.table("users").delete().eq("id", supa_id).execute()
             with db.get_connection() as conn:
                 cur = conn.cursor()
                 cur.execute("DELETE FROM depenses WHERE user_id=? AND synced=2", (local_id,))
+                cur.execute("DELETE FROM listes WHERE user_id=? AND synced=2", (local_id,))
                 cur.execute("DELETE FROM users WHERE id=? AND synced=2", (local_id,))
                 conn.commit()
             count += 1
@@ -270,7 +332,7 @@ def sync_deletions(supabase: Client) -> int:
 
 def restore_from_supabase(supabase: Client) -> dict:
     """Recupere toutes les donnees Supabase absentes localement et les importe."""
-    result = {"users": 0, "depenses": 0}
+    result = {"users": 0, "listes": 0, "depenses": 0}
     with db.get_connection() as conn:
         cur = conn.cursor()
         local_id_by_username = {}
@@ -309,34 +371,83 @@ def restore_from_supabase(supabase: Client) -> dict:
             conn.commit()
             local_id_by_username[u["username"]] = local_id
 
-        # Les listes historiques de Version-3 (nom sans compte correspondant)
-        # sont rattachees a l'administrateur.
+        # Les listes historiques de Version-3 (nom sans prefixe utilisateur)
+        # sont rattachees a l'administrateur, chacune restant une liste
+        # distincte (Tous les depenses pour UTBM, Amortissement des 6000, ...).
         cur.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")
         row = cur.fetchone()
         admin_local_id = row[0] if row else None
+        usernames = set(local_id_by_username.keys())
 
         listes = supabase.table("listes_depenses").select("*").execute().data
-        owner_by_liste = {}
+        local_liste_by_remote = {}
+        owner_by_remote_liste = {}
         for liste in listes:
-            owner_by_liste[liste["id"]] = local_id_by_username.get(liste.get("nom"), admin_local_id)
+            owner_username, display_nom = _decode_liste_nom(liste.get("nom") or "", usernames)
+            owner_id = local_id_by_username.get(owner_username, admin_local_id) if owner_username else admin_local_id
+            if owner_id is None:
+                continue
+            owner_by_remote_liste[liste["id"]] = owner_id
+
+            cur.execute("SELECT id FROM listes WHERE supabase_id=?", (liste["id"],))
+            existing = cur.fetchone()
+            if existing:
+                local_liste_id = existing[0]
+            else:
+                # Une liste locale du meme nom en attente d'envoi ? On la lie
+                # au lieu de creer un doublon.
+                cur.execute(
+                    "SELECT id FROM listes WHERE user_id=? AND nom=? AND supabase_id IS NULL AND synced != 2",
+                    (owner_id, display_nom),
+                )
+                pending = cur.fetchone()
+                if pending:
+                    local_liste_id = pending[0]
+                    cur.execute(
+                        "UPDATE listes SET synced=1, supabase_id=? WHERE id=?",
+                        (liste["id"], local_liste_id),
+                    )
+                else:
+                    cur.execute(
+                        "INSERT INTO listes (nom, user_id, date_creation, synced, supabase_id) "
+                        "VALUES (?, ?, ?, 1, ?)",
+                        (display_nom, owner_id, liste.get("date_creation"), liste["id"]),
+                    )
+                    local_liste_id = cur.lastrowid
+                    result["listes"] += 1
+                    print(f"[RESTORE] Liste '{display_nom}' restauree")
+                conn.commit()
+            local_liste_by_remote[liste["id"]] = local_liste_id
 
         depenses = supabase.table("depenses").select("*").execute().data
         for d in depenses:
-            owner_id = owner_by_liste.get(d.get("liste_id"), admin_local_id)
+            local_liste_id = local_liste_by_remote.get(d.get("liste_id"))
+            owner_id = owner_by_remote_liste.get(d.get("liste_id"), admin_local_id)
             if owner_id is None:
                 continue
-            cur.execute("SELECT id FROM depenses WHERE supabase_id=?", (d["id"],))
-            if not cur.fetchone():
+            cur.execute("SELECT id, liste_id FROM depenses WHERE supabase_id=?", (d["id"],))
+            existing = cur.fetchone()
+            if existing:
+                # Reparation : depense deja locale mais pas encore rattachee a
+                # sa liste (donnees d'avant l'arrivee des listes).
+                if existing[1] is None and local_liste_id is not None:
+                    cur.execute(
+                        "UPDATE depenses SET liste_id=?, user_id=? WHERE id=?",
+                        (local_liste_id, owner_id, existing[0]),
+                    )
+                    conn.commit()
+            else:
                 cur.execute(
-                    "INSERT INTO depenses (description, montant, categorie, date, user_id, synced, supabase_id) "
-                    "VALUES (?, ?, ?, ?, ?, 1, ?)",
+                    "INSERT INTO depenses (description, montant, categorie, date, user_id, liste_id, synced, supabase_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
                     (d.get("description"), d.get("montant"), d.get("categorie"), d.get("date"),
-                     owner_id, d["id"]),
+                     owner_id, local_liste_id, d["id"]),
                 )
                 conn.commit()
                 result["depenses"] += 1
 
-    print(f"[RESTORE] {result['users']} compte(s) et {result['depenses']} depense(s) restaures depuis Supabase")
+    print(f"[RESTORE] {result['users']} compte(s), {result['listes']} liste(s) et "
+          f"{result['depenses']} depense(s) restaures depuis Supabase")
     return result
 
 
@@ -380,10 +491,12 @@ def run_sync() -> dict:
     try:
         supabase = get_supabase()
         u = sync_users(supabase)
+        listes = sync_listes(supabase)
         d = sync_depenses(supabase)
         deleted = sync_deletions(supabase)
         print("[SYNC] Synchronisation complete")
-        return {"online": True, "synced": True, "users": u, "depenses": d, "deleted": deleted}
+        return {"online": True, "synced": True, "users": u, "listes": listes,
+                "depenses": d, "deleted": deleted}
     except Exception as e:
         print(f"[SYNC] Erreur sync : {e}")
         return {"online": True, "synced": False, "error": str(e)}
@@ -399,12 +512,15 @@ def full_sync() -> dict:
         supabase = get_supabase()
         restored = restore_from_supabase(supabase)
         u = sync_users(supabase)
+        listes = sync_listes(supabase)
         d = sync_depenses(supabase)
         deleted = sync_deletions(supabase)
         return {
             "online": True, "synced": True,
-            "restored_users": restored["users"], "restored_depenses": restored["depenses"],
-            "users": u, "depenses": d, "deleted": deleted,
+            "restored_users": restored["users"],
+            "restored_listes": restored["listes"],
+            "restored_depenses": restored["depenses"],
+            "users": u, "listes": listes, "depenses": d, "deleted": deleted,
         }
     except Exception as e:
         print(f"[SYNC] Erreur sync : {e}")

@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 
 import flet as ft
 
@@ -18,132 +17,71 @@ C_MUTED = "#616161"
 
 
 def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
+    """Page d'accueil de l'utilisateur : ses listes de depenses."""
     user = session["user"]
     uid = user["id"]
 
-    edit_id: dict = {"id": None}
-
-    # ── Champs du formulaire ──────────────────────────────────────────────
-    description_field = ft.TextField(
-        label="Description",
-        prefix_icon=ft.Icons.DESCRIPTION_OUTLINED,
-        border_radius=12,
-        focused_border_color=C_PRIMARY,
-    )
-    montant_field = ft.TextField(
-        label="Montant",
-        prefix_icon=ft.Icons.ATTACH_MONEY,
-        keyboard_type=ft.KeyboardType.NUMBER,
-        border_radius=12,
-        focused_border_color=C_PRIMARY,
-    )
-    categorie_field = ft.TextField(
-        label="Categorie",
-        prefix_icon=ft.Icons.CATEGORY_OUTLINED,
-        border_radius=12,
-        focused_border_color=C_PRIMARY,
-    )
-    date_field = ft.TextField(
-        label="Date (YYYY-MM-DD)",
-        value=datetime.now().strftime("%Y-%m-%d"),
-        prefix_icon=ft.Icons.CALENDAR_MONTH,
-        border_radius=12,
-        focused_border_color=C_PRIMARY,
-    )
-    submit_label = ft.Text("Ajouter", color=ft.Colors.WHITE, weight=ft.FontWeight.W_600)
-
     total_text = ft.Text("0.00", size=26, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE)
-    count_text = ft.Text("0 depense(s)", size=13, color=ft.Colors.WHITE70)
+    count_text = ft.Text("", size=13, color=ft.Colors.WHITE70)
 
-    depenses_list = ft.ListView(spacing=8, expand=False, auto_scroll=False)
+    nouvelle_liste_field = ft.TextField(
+        label="Nom de la nouvelle liste",
+        prefix_icon=ft.Icons.PLAYLIST_ADD,
+        border_radius=12,
+        focused_border_color=C_PRIMARY,
+        expand=True,
+    )
+
+    listes_column = ft.Column(spacing=10)
     list_area = ft.Container()
 
-    # ── Helpers ────────────────────────────────────────────────────────────
+    # ── Construction des cartes de listes ────────────────────────────────
 
-    def clear_form():
-        description_field.value = ""
-        montant_field.value = ""
-        categorie_field.value = ""
-        date_field.value = datetime.now().strftime("%Y-%m-%d")
-        edit_id["id"] = None
-        submit_label.value = "Ajouter"
-
-    def validate_form():
-        if not all([description_field.value, montant_field.value,
-                    categorie_field.value, date_field.value]):
-            Diag.error_dialog(page, message="Veuillez remplir tous les champs.")
-            return False, 0.0
-        try:
-            m = float(montant_field.value)
-            if m < 0:
-                Diag.error_dialog(page, message="Le montant doit etre positif.")
-                return False, 0.0
-        except ValueError:
-            Diag.error_dialog(page, message="Le montant doit etre un nombre valide.")
-            return False, 0.0
-        try:
-            datetime.strptime(date_field.value, "%Y-%m-%d")
-        except ValueError:
-            Diag.error_dialog(page, message="Format de date invalide. Utilisez YYYY-MM-DD.")
-            return False, 0.0
-        return True, float(montant_field.value)
-
-    def _expense_card(dep_id, desc, montant, cat, date):
+    def _liste_card(liste: dict) -> ft.Card:
         return ft.Card(
             elevation=2,
             content=ft.Container(
                 bgcolor=C_SURFACE,
                 border_radius=12,
                 padding=ft.padding.symmetric(horizontal=14, vertical=12),
-                content=ft.Column(
-                    spacing=6,
+                on_click=lambda e, l=liste: _open_liste(l),
+                content=ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     controls=[
                         ft.Row(
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            spacing=12,
+                            expand=True,
                             controls=[
-                                ft.Text(desc, size=15, weight=ft.FontWeight.W_600,
-                                        color=C_TEXT, expand=True),
                                 ft.Container(
+                                    width=42, height=42, border_radius=10,
                                     bgcolor="#E8F5E9",
-                                    border_radius=8,
-                                    padding=ft.padding.symmetric(horizontal=10, vertical=4),
-                                    content=ft.Text(f"{montant:.2f}", color=C_DARK,
-                                                    weight=ft.FontWeight.BOLD, size=14),
+                                    alignment=ft.Alignment.CENTER,
+                                    content=ft.Icon(ft.Icons.FOLDER_OUTLINED, color=C_PRIMARY, size=22),
+                                ),
+                                ft.Column(
+                                    spacing=2,
+                                    expand=True,
+                                    controls=[
+                                        ft.Text(liste["nom"], size=15, weight=ft.FontWeight.W_600, color=C_TEXT),
+                                        ft.Text(
+                                            f"{liste['count']} depense(s) — Total : {liste['total']:.2f}",
+                                            size=12, color=C_MUTED,
+                                        ),
+                                    ],
                                 ),
                             ],
                         ),
                         ft.Row(
-                            spacing=16,
+                            spacing=0,
                             controls=[
-                                ft.Row(spacing=4, controls=[
-                                    ft.Icon(ft.Icons.LABEL_OUTLINE, size=14, color=C_MUTED),
-                                    ft.Text(cat, size=13, color=C_MUTED),
-                                ]),
-                                ft.Row(spacing=4, controls=[
-                                    ft.Icon(ft.Icons.CALENDAR_TODAY, size=14, color=C_MUTED),
-                                    ft.Text(date, size=13, color=C_MUTED),
-                                ]),
-                            ],
-                        ),
-                        ft.Divider(height=1, color="#F5F5F5"),
-                        ft.Row(
-                            alignment=ft.MainAxisAlignment.END,
-                            spacing=4,
-                            controls=[
-                                ft.IconButton(
-                                    icon=ft.Icons.EDIT_OUTLINED,
-                                    icon_color=C_BLUE,
-                                    icon_size=20,
-                                    tooltip="Modifier",
-                                    on_click=lambda e, d=(dep_id, desc, montant, cat, date): _load_edit(d),
-                                ),
                                 ft.IconButton(
                                     icon=ft.Icons.DELETE_OUTLINE,
                                     icon_color=C_ERROR,
                                     icon_size=20,
-                                    tooltip="Supprimer",
-                                    on_click=lambda e, did=dep_id: _confirm_delete(did),
+                                    tooltip="Supprimer la liste",
+                                    on_click=lambda e, l=liste: _confirm_delete_liste(l),
                                 ),
+                                ft.Icon(ft.Icons.CHEVRON_RIGHT, color=C_MUTED),
                             ],
                         ),
                     ],
@@ -151,29 +89,32 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
             ),
         )
 
-    def _populate_list(depenses):
-        depenses_list.controls.clear()
-        if not depenses:
-            depenses_list.controls.append(
+    def _populate_listes():
+        listes = db.get_listes(uid)
+        listes_column.controls.clear()
+        if not listes:
+            listes_column.controls.append(
                 ft.Container(
                     padding=32,
                     content=ft.Column(
                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                         spacing=12,
                         controls=[
-                            ft.Icon(ft.Icons.RECEIPT_LONG, size=52, color="#BDBDBD"),
-                            ft.Text("Aucune depense enregistree", italic=True, color="#9E9E9E", size=15),
+                            ft.Icon(ft.Icons.FOLDER_OFF_OUTLINED, size=52, color="#BDBDBD"),
+                            ft.Text("Aucune liste pour le moment", italic=True, color="#9E9E9E", size=15),
+                            ft.Text("Creez votre premiere liste ci-dessus.", size=12, color="#BDBDBD"),
                         ],
                     ),
                 )
             )
         else:
-            for dep_id, desc, montant, cat, date in depenses:
-                depenses_list.controls.append(_expense_card(dep_id, desc, montant, cat, date))
+            for liste in listes:
+                listes_column.controls.append(_liste_card(liste))
 
     def _update_totals():
+        listes = db.get_listes(uid)
         total_text.value = f"{db.calcul_total(uid):.2f}"
-        count_text.value = f"{db.get_depenses_count(uid)} depense(s)"
+        count_text.value = f"{db.get_depenses_count(uid)} depense(s) dans {len(listes)} liste(s)"
 
     def _render_list_area():
         has_pin = db.has_section_pin(uid)
@@ -193,7 +134,7 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
                         ft.Icon(ft.Icons.LOCK, size=64, color="#BDBDBD"),
                         ft.Text("Section verrouillee", size=16, color="#9E9E9E"),
                         ft.Text(
-                            "Entrez votre code PIN pour acceder a vos depenses.",
+                            "Entrez votre code PIN pour acceder a vos listes.",
                             size=13, color="#BDBDBD", text_align=ft.TextAlign.CENTER,
                         ),
                         ft.ElevatedButton(
@@ -209,28 +150,34 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
                 ),
             )
         else:
-            _populate_list(db.get_depenses(uid))
-            list_area.content = depenses_list
+            _populate_listes()
+            list_area.content = listes_column
 
     def refresh():
         _update_totals()
         _render_list_area()
         page.update()
 
-    def _load_edit(data):
-        dep_id, desc, montant, cat, date = data
-        edit_id["id"] = dep_id
-        description_field.value = desc
-        montant_field.value = str(montant)
-        categorie_field.value = cat
-        date_field.value = date
-        submit_label.value = "Enregistrer"
-        page.update()
+    # ── Actions ───────────────────────────────────────────────────────────
 
-    def _confirm_delete(dep_id):
+    def creer_liste(e):
+        ok, msg = db.create_liste(nouvelle_liste_field.value, uid)
+        if not ok:
+            Diag.error_dialog(page, message=msg)
+            return
+        nouvelle_liste_field.value = ""
+        refresh()
+
+    nouvelle_liste_field.on_submit = creer_liste
+
+    def _open_liste(liste: dict):
+        session["current_liste"] = {"id": liste["id"], "nom": liste["nom"]}
+        navigate("/liste")
+
+    def _confirm_delete_liste(liste: dict):
         def do_delete(e):
             Diag.close_dialog(page, dlg)
-            db.delete_depense(dep_id)
+            db.delete_liste(liste["id"])
             refresh()
 
         def cancel(e):
@@ -238,35 +185,11 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
 
         dlg = Diag.ask_dialog(
             page,
-            title="Confirmer",
-            message="Voulez-vous supprimer cette depense ?",
+            title="Confirmation",
+            message=f"Supprimer la liste « {liste['nom']} » et toutes ses depenses ?",
             on_oui=do_delete,
             on_non=cancel,
         )
-
-    def save_depense(e):
-        valid, montant = validate_form()
-        if not valid:
-            return
-
-        desc = description_field.value.strip()
-        cat = categorie_field.value.strip()
-        date = date_field.value.strip()
-
-        if edit_id["id"] is None:
-            db.add_depense(desc, montant, cat, date, uid)
-            msg = "Depense ajoutee avec succes."
-        else:
-            db.update_depense(edit_id["id"], desc, montant, cat, date)
-            msg = "Depense modifiee avec succes."
-
-        clear_form()
-        refresh()
-
-        def close(e):
-            Diag.close_dialog(page, dlg)
-
-        dlg = Diag.success_dialog(page, message=msg, on_ok=close)
 
     async def create_pdf(e):
         if page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS):
@@ -339,18 +262,18 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
         else:
             _show_unlock_dialog()
 
-    # ── Wallpaper ─────────────────────────────────────────────────────
+    # ── Wallpaper ─────────────────────────────────────────────────────────
 
     wallpaper = db.get_wallpaper(uid)
     use_wallpaper = bool(wallpaper)
 
-    # ── Actions AppBar ────────────────────────────────────────────────
+    # ── Actions AppBar ────────────────────────────────────────────────────
 
     appbar_actions = [
         ft.IconButton(
             icon=ft.Icons.PICTURE_AS_PDF,
             icon_color=ft.Colors.WHITE,
-            tooltip="Telecharger PDF",
+            tooltip="Telecharger PDF (toutes mes depenses)",
             on_click=create_pdf,
         ),
         ft.IconButton(
@@ -368,7 +291,7 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
             on_click=lambda e: navigate("/admin"),
         ))
 
-    # ── Section verrou (visible seulement si PIN configure) ─────────────────
+    # ── En-tete de section avec verrou ────────────────────────────────────
 
     has_pin = db.has_section_pin(uid)
     lock_toggle_btn = ft.IconButton(
@@ -379,10 +302,10 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
         visible=has_pin,
         on_click=toggle_lock,
     )
-    lock_section_header = ft.Row(
+    section_header = ft.Row(
         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         controls=[
-            ft.Text("Mes depenses", size=16, weight=ft.FontWeight.BOLD, color=C_TEXT),
+            ft.Text("Mes listes", size=16, weight=ft.FontWeight.BOLD, color=C_TEXT),
             ft.Row(
                 spacing=4,
                 controls=[
@@ -399,12 +322,10 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
         ],
     )
 
-    # ── Construire l'etat initial (sans page.update) ────────────────────────
+    # ── Etat initial (sans page.update) ───────────────────────────────────
 
     _update_totals()
     _render_list_area()
-
-    # ── Cartes principales ──────────────────────────────────────────────
 
     summary_card = ft.Card(
         elevation=4,
@@ -445,38 +366,27 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
                     ft.Row(
                         spacing=8,
                         controls=[
-                            ft.Icon(ft.Icons.ADD_CIRCLE_OUTLINE, color=C_PRIMARY, size=20),
-                            ft.Text("Nouvelle depense", size=16, weight=ft.FontWeight.BOLD, color=C_TEXT),
+                            ft.Icon(ft.Icons.CREATE_NEW_FOLDER_OUTLINED, color=C_PRIMARY, size=20),
+                            ft.Text("Nouvelle liste", size=16, weight=ft.FontWeight.BOLD, color=C_TEXT),
                         ],
                     ),
-                    ft.Row(spacing=10, controls=[
-                        ft.Container(content=description_field, expand=True),
-                        ft.Container(content=montant_field, expand=True),
-                    ]),
-                    ft.Row(spacing=10, controls=[
-                        ft.Container(content=categorie_field, expand=True),
-                        ft.Container(content=date_field, expand=True),
-                    ]),
-                    ft.Row([
-                        ft.ElevatedButton(
-                            content=ft.Row(
-                                controls=[
-                                    ft.Icon(ft.Icons.SAVE_OUTLINED, color=ft.Colors.WHITE),
-                                    submit_label,
-                                ],
-                                alignment=ft.MainAxisAlignment.CENTER,
-                                tight=True,
+                    ft.Row(
+                        spacing=10,
+                        controls=[
+                            nouvelle_liste_field,
+                            ft.ElevatedButton(
+                                "Creer",
+                                icon=ft.Icons.ADD,
+                                on_click=creer_liste,
+                                style=ft.ButtonStyle(
+                                    bgcolor=C_PRIMARY,
+                                    color=ft.Colors.WHITE,
+                                    shape=ft.RoundedRectangleBorder(radius=10),
+                                    padding=ft.padding.symmetric(horizontal=18, vertical=14),
+                                ),
                             ),
-                            on_click=save_depense,
-                            expand=True,
-                            style=ft.ButtonStyle(
-                                bgcolor=C_PRIMARY,
-                                color=ft.Colors.WHITE,
-                                shape=ft.RoundedRectangleBorder(radius=10),
-                                padding=ft.padding.symmetric(vertical=12),
-                            ),
-                        )
-                    ]),
+                        ],
+                    ),
                 ],
             ),
         ),
@@ -490,29 +400,9 @@ def build_expenses_view(page: ft.Page, session: dict, navigate) -> ft.View:
             ft.Container(
                 content=ft.Column(
                     spacing=10,
-                    controls=[lock_section_header, list_area],
+                    controls=[section_header, list_area],
                 ),
             ),
-            ft.Row([
-                ft.ElevatedButton(
-                    content=ft.Row(
-                        controls=[
-                            ft.Icon(ft.Icons.PICTURE_AS_PDF, color=ft.Colors.WHITE),
-                            ft.Text("Telecharger PDF", color=ft.Colors.WHITE, weight=ft.FontWeight.W_500),
-                        ],
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        tight=True,
-                    ),
-                    on_click=create_pdf,
-                    expand=True,
-                    style=ft.ButtonStyle(
-                        bgcolor=C_PURPLE,
-                        color=ft.Colors.WHITE,
-                        shape=ft.RoundedRectangleBorder(radius=10),
-                        padding=ft.padding.symmetric(vertical=12),
-                    ),
-                )
-            ]),
         ],
     )
 

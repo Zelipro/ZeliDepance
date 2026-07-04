@@ -7,6 +7,7 @@ import supabase_sync
 from views.login_view import build_login_view
 from views.register_view import build_register_view
 from views.expenses_view import build_expenses_view
+from views.liste_view import build_liste_view
 from views.admin_view import build_admin_view
 from views.settings_view import build_settings_view
 
@@ -39,6 +40,11 @@ async def main(page: ft.Page) -> None:
             page.views.append(build_login_view(page, session, navigate))
         elif route == "/expenses":
             page.views.append(build_expenses_view(page, session, navigate))
+        elif route == "/liste":
+            if session.get("current_liste"):
+                page.views.append(build_liste_view(page, session, navigate))
+            else:
+                page.views.append(build_expenses_view(page, session, navigate))
         elif route == "/admin":
             if session["user"]["role"] == "admin":
                 page.views.append(build_admin_view(page, session, navigate))

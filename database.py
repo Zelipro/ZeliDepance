@@ -76,6 +76,19 @@ def init_db() -> None:
             )
         """)
 
+        # Listes de depenses (meme principe que Version-3), rattachees a un
+        # utilisateur. synced/supabase_id : meme convention que depenses.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS listes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom TEXT NOT NULL,
+                user_id INTEGER REFERENCES users(id),
+                date_creation TEXT,
+                synced INTEGER DEFAULT 0,
+                supabase_id INTEGER DEFAULT NULL
+            )
+        """)
+
         conn.commit()
 
         # Migration: ajouter user_id a depenses si absent
@@ -91,6 +104,8 @@ def init_db() -> None:
             cur.execute("ALTER TABLE depenses ADD COLUMN synced INTEGER DEFAULT 0")
         if "supabase_id" not in cols:
             cur.execute("ALTER TABLE depenses ADD COLUMN supabase_id INTEGER DEFAULT NULL")
+        if "liste_id" not in cols:
+            cur.execute("ALTER TABLE depenses ADD COLUMN liste_id INTEGER REFERENCES listes(id)")
         conn.commit()
 
         cur.execute("PRAGMA table_info(users)")
@@ -119,6 +134,35 @@ def init_db() -> None:
                 h, s = _hash("Deg")
                 cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (h, s, admin_id))
             cur.execute("UPDATE depenses SET user_id = ? WHERE user_id IS NULL", (admin_id,))
+
+        conn.commit()
+
+        # Migration: les depenses purement locales (jamais synchronisees) sans
+        # liste sont rangees dans une liste par defaut de leur proprietaire.
+        # Celles deja liees au cloud (supabase_id) seront rattachees a leur
+        # vraie liste lors de la prochaine restauration.
+        cur.execute(
+            "SELECT DISTINCT user_id FROM depenses "
+            "WHERE liste_id IS NULL AND supabase_id IS NULL AND user_id IS NOT NULL"
+        )
+        for (owner_id,) in cur.fetchall():
+            cur.execute(
+                "SELECT id FROM listes WHERE user_id = ? AND nom = ? AND synced != 2",
+                (owner_id, "Mes depenses"),
+            )
+            row = cur.fetchone()
+            if row:
+                default_liste_id = row[0]
+            else:
+                cur.execute(
+                    "INSERT INTO listes (nom, user_id, date_creation, synced) VALUES (?, ?, datetime('now'), 0)",
+                    ("Mes depenses", owner_id),
+                )
+                default_liste_id = cur.lastrowid
+            cur.execute(
+                "UPDATE depenses SET liste_id = ? WHERE user_id = ? AND liste_id IS NULL AND supabase_id IS NULL",
+                (default_liste_id, owner_id),
+            )
 
         conn.commit()
 
@@ -202,7 +246,7 @@ def approve_user(user_id: int, approved: bool) -> None:
 
 def delete_user(user_id: int) -> None:
     """
-    Supprime un utilisateur et ses depenses :
+    Supprime un utilisateur, ses listes et ses depenses :
     - Si jamais synchronise (supabase_id NULL) -> suppression directe
     - Sinon -> marque synced=2 (sera supprime sur Supabase a la prochaine sync)
     """
@@ -220,8 +264,17 @@ def delete_user(user_id: int) -> None:
                 "DELETE FROM depenses WHERE user_id = ? AND supabase_id IS NULL",
                 (user_id,),
             )
+            cur.execute(
+                "UPDATE listes SET synced = 2 WHERE user_id = ? AND supabase_id IS NOT NULL",
+                (user_id,),
+            )
+            cur.execute(
+                "DELETE FROM listes WHERE user_id = ? AND supabase_id IS NULL",
+                (user_id,),
+            )
         else:
             cur.execute("DELETE FROM depenses WHERE user_id = ?", (user_id,))
+            cur.execute("DELETE FROM listes WHERE user_id = ?", (user_id,))
             cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
         cur.execute("DELETE FROM user_preferences WHERE user_id = ?", (user_id,))
         conn.commit()
@@ -300,23 +353,110 @@ def set_wallpaper(user_id: int, path: str) -> None:
         conn.commit()
 
 
-# ── Operations sur les depenses ──────────────────────────────────────────────
+# ── Listes de depenses ───────────────────────────────────────────────────────
 
-def add_depense(description: str, montant: float, categorie: str, date: str, user_id: int = None) -> None:
+def create_liste(nom: str, user_id: int) -> tuple:
+    nom = (nom or "").strip()
+    if not nom:
+        return False, "Le nom de la liste ne peut pas etre vide."
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO depenses (description, montant, categorie, date, user_id, synced) "
-            "VALUES (?, ?, ?, ?, ?, 0)",
-            (description, montant, categorie, date, user_id),
+            "SELECT id FROM listes WHERE user_id = ? AND nom = ? AND synced != 2",
+            (user_id, nom),
+        )
+        if cur.fetchone():
+            return False, "Vous avez deja une liste portant ce nom."
+        cur.execute(
+            "INSERT INTO listes (nom, user_id, date_creation, synced) VALUES (?, ?, datetime('now'), 0)",
+            (nom, user_id),
+        )
+        conn.commit()
+    return True, "Liste creee."
+
+
+def get_listes(user_id: int) -> list:
+    """Retourne les listes actives d'un utilisateur :
+    [{id, nom, count, total}]"""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT l.id, l.nom,
+                   COUNT(CASE WHEN d.synced != 2 THEN d.id END),
+                   COALESCE(SUM(CASE WHEN d.synced != 2 THEN d.montant END), 0)
+            FROM listes l
+            LEFT JOIN depenses d ON d.liste_id = l.id
+            WHERE l.user_id = ? AND l.synced != 2
+            GROUP BY l.id, l.nom
+            ORDER BY l.id DESC
+            """,
+            (user_id,),
+        )
+        return [
+            {"id": r[0], "nom": r[1], "count": r[2], "total": float(r[3])}
+            for r in cur.fetchall()
+        ]
+
+
+def get_liste_nom(liste_id: int) -> str:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT nom FROM listes WHERE id = ?", (liste_id,))
+        row = cur.fetchone()
+    return row[0] if row else ""
+
+
+def delete_liste(liste_id: int) -> None:
+    """
+    Supprime une liste et ses depenses :
+    - jamais synchronisee -> suppression directe
+    - sinon -> marquee synced=2 (supprimee sur Supabase a la prochaine sync)
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT supabase_id FROM listes WHERE id = ?", (liste_id,))
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            cur.execute("UPDATE listes SET synced = 2 WHERE id = ?", (liste_id,))
+            cur.execute(
+                "UPDATE depenses SET synced = 2 WHERE liste_id = ? AND supabase_id IS NOT NULL",
+                (liste_id,),
+            )
+            cur.execute(
+                "DELETE FROM depenses WHERE liste_id = ? AND supabase_id IS NULL",
+                (liste_id,),
+            )
+        else:
+            cur.execute("DELETE FROM depenses WHERE liste_id = ?", (liste_id,))
+            cur.execute("DELETE FROM listes WHERE id = ?", (liste_id,))
+        conn.commit()
+
+
+# ── Operations sur les depenses ──────────────────────────────────────────────
+
+def add_depense(description: str, montant: float, categorie: str, date: str,
+                user_id: int = None, liste_id: int = None) -> None:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO depenses (description, montant, categorie, date, user_id, liste_id, synced) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0)",
+            (description, montant, categorie, date, user_id, liste_id),
         )
         conn.commit()
 
 
-def get_depenses(user_id: int = None) -> list:
+def get_depenses(user_id: int = None, liste_id: int = None) -> list:
     with get_connection() as conn:
         cur = conn.cursor()
-        if user_id is not None:
+        if liste_id is not None:
+            rows = cur.execute(
+                "SELECT id, description, montant, categorie, date FROM depenses "
+                "WHERE liste_id = ? AND synced != 2 ORDER BY id DESC",
+                (liste_id,),
+            ).fetchall()
+        elif user_id is not None:
             rows = cur.execute(
                 "SELECT id, description, montant, categorie, date FROM depenses "
                 "WHERE user_id = ? AND synced != 2 ORDER BY id DESC",
@@ -385,16 +525,23 @@ def get_depenses_count(user_id: int = None) -> int:
     return result[0] if result else 0
 
 
-def generate_pdf(file_path: str, user_id: int = None, user_nom: str = "") -> None:
-    depenses = get_depenses(user_id)
-    total = calcul_total(user_id)
+def generate_pdf(file_path: str, user_id: int = None, user_nom: str = "",
+                 liste_id: int = None, liste_nom: str = "") -> None:
+    if liste_id is not None:
+        depenses = get_depenses(liste_id=liste_id)
+        total = sum(d[2] for d in depenses)
+    else:
+        depenses = get_depenses(user_id)
+        total = calcul_total(user_id)
 
     doc = SimpleDocTemplate(file_path, pagesize=A4)
     styles = getSampleStyleSheet()
     elements = []
 
     titre = "Rapport des depenses"
-    if user_nom:
+    if liste_nom:
+        titre += f" — {liste_nom}"
+    elif user_nom:
         titre += f" — {user_nom}"
     elements.append(Paragraph(titre, styles["Title"]))
     elements.append(Spacer(1, 12))
