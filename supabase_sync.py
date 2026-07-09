@@ -1,8 +1,7 @@
 """
 supabase_sync.py — Synchronisation SQLite local <-> Supabase.
 
-Meme principe que la branche Version-3 : client supabase-py officiel,
-colonnes synced/supabase_id (0=a envoyer, 1=a jour, 2=a supprimer), sync
+Colonnes synced/supabase_id (0=a envoyer, 1=a jour, 2=a supprimer), sync
 lancee en arriere-plan au demarrage avec des SnackBars de statut.
 
 Le projet Supabase est PARTAGE avec l'application Version-3, qui possede
@@ -10,12 +9,12 @@ deja les tables listes_depenses (id, nom, date_creation) et depenses
 (id, liste_id, description, montant, categorie, date). Leur structure ne
 doit jamais etre modifiee. Cette version multi-utilisateurs s'y adapte :
 
-  - chaque utilisateur de l'app correspond a une liste dont le nom est son
-    identifiant (creee automatiquement au premier envoi de depense) ;
-  - ses depenses sont stockees dans la table depenses existante via
+  - chaque liste distante encode son proprietaire dans son nom
+    ("identifiant::nom" ou nom tel quel pour l'administrateur) ;
+  - les depenses restent stockees dans la table depenses existante via
     liste_id, comme le fait Version-3 ;
-  - les listes historiques de Version-3 (dont le nom ne correspond a aucun
-    identifiant) sont importees comme depenses de l'administrateur (Deg) ;
+  - les listes historiques de Version-3 (nom sans prefixe utilisateur)
+    sont rattachees a l'administrateur (Deg) ;
   - la table users (comptes) est la seule table propre a cette version.
 
 Contrairement a Version-3, l'URL et la cle du projet Supabase ne sont
@@ -23,14 +22,117 @@ JAMAIS ecrites dans le code source : l'administrateur les saisit depuis
 le panneau Administration, elles sont stockees uniquement dans la base
 SQLite locale (table app_config) et ne sont donc jamais poussees sur
 GitHub.
+
+Le client REST ci-dessous est reimplemente a la main avec uniquement la
+bibliotheque standard (urllib), au lieu du SDK officiel supabase-py :
+celui-ci depend de pydantic (extension native pydantic-core, en Rust) et
+de yarl (extension C) via postgrest/storage3/realtime/supabase-auth. Ces
+binaires n'existent pas pour Android/iOS, ce qui faisait planter l'app
+juste apres l'ecran de demarrage (splash) une fois compilee avec
+`flet build apk`. Ce client minimal parle directement l'API REST
+PostgREST exposee par Supabase et fonctionne donc sur toutes les
+plateformes.
 """
 
+import json
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime
 
-from supabase import create_client, Client
-
 import database as db
+
+
+# ── Client PostgREST minimal (stdlib pure, sans dependance native) ──────────
+
+class _PostgrestResponse:
+    def __init__(self, data):
+        self.data = data
+
+
+class _QueryBuilder:
+    def __init__(self, base_url: str, api_key: str, table: str):
+        self._base_url = base_url
+        self._api_key = api_key
+        self._table = table
+        self._method = "GET"
+        self._select = "*"
+        self._filters = []
+        self._payload = None
+        self._limit = None
+
+    def select(self, columns: str = "*"):
+        self._method = "GET"
+        self._select = columns
+        return self
+
+    def insert(self, payload):
+        self._method = "POST"
+        self._payload = payload
+        return self
+
+    def update(self, payload):
+        self._method = "PATCH"
+        self._payload = payload
+        return self
+
+    def delete(self):
+        self._method = "DELETE"
+        return self
+
+    def eq(self, field: str, value):
+        self._filters.append((field, value))
+        return self
+
+    def limit(self, n: int):
+        self._limit = n
+        return self
+
+    def execute(self) -> _PostgrestResponse:
+        params = []
+        if self._method == "GET":
+            params.append(("select", self._select))
+        for field, value in self._filters:
+            params.append((field, f"eq.{value}"))
+        if self._limit is not None:
+            params.append(("limit", str(self._limit)))
+
+        url = f"{self._base_url}/rest/v1/{self._table}"
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+
+        headers = {
+            "apikey": self._api_key,
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation",
+        }
+        body = json.dumps(self._payload).encode("utf-8") if self._payload is not None else None
+
+        req = urllib.request.Request(url, data=body, headers=headers, method=self._method)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw = resp.read()
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "ignore")
+            raise RuntimeError(f"{e.code} {e.reason} — {detail}") from None
+
+        data = json.loads(raw) if raw else []
+        return _PostgrestResponse(data)
+
+
+class Client:
+    def __init__(self, url: str, api_key: str):
+        self._url = url.rstrip("/")
+        self._api_key = api_key
+
+    def table(self, name: str) -> _QueryBuilder:
+        return _QueryBuilder(self._url, self._api_key, name)
+
+
+def create_client(url: str, api_key: str) -> Client:
+    return Client(url, api_key)
 
 
 # ── Configuration ─────────────────────────────────────────────────────────
