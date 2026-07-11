@@ -89,7 +89,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
                  style=ft.ButtonStyle(
                      bgcolor=C_PRIMARY, color=ft.Colors.WHITE,
                      shape=ft.RoundedRectangleBorder(radius=10),
-                     padding=ft.padding.symmetric(vertical=10),
+                     padding=ft.Padding.symmetric(vertical=10),
                  ),
              )
          ])],
@@ -107,7 +107,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
     pin_error = ft.Text("", color=C_ERROR, size=12, visible=False)
     has_pin = db.has_section_pin(uid)
     pin_status = ft.Container(
-        padding=ft.padding.symmetric(horizontal=10, vertical=6),
+        padding=ft.Padding.symmetric(horizontal=10, vertical=6),
         border_radius=20,
         bgcolor="#E8F5E9" if has_pin else "#FFF3E0",
         content=ft.Row(
@@ -186,7 +186,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
                         style=ft.ButtonStyle(
                             bgcolor=C_PRIMARY, color=ft.Colors.WHITE,
                             shape=ft.RoundedRectangleBorder(radius=10),
-                            padding=ft.padding.symmetric(vertical=10),
+                            padding=ft.Padding.symmetric(vertical=10),
                         ),
                     ),
                     ft.OutlinedButton(
@@ -198,7 +198,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
                             color=C_ERROR,
                             side=ft.BorderSide(1, C_ERROR),
                             shape=ft.RoundedRectangleBorder(radius=10),
-                            padding=ft.padding.symmetric(vertical=10),
+                            padding=ft.Padding.symmetric(vertical=10),
                         ),
                     ),
                 ],
@@ -271,7 +271,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
                         style=ft.ButtonStyle(
                             bgcolor=C_PRIMARY, color=ft.Colors.WHITE,
                             shape=ft.RoundedRectangleBorder(radius=10),
-                            padding=ft.padding.symmetric(vertical=10),
+                            padding=ft.Padding.symmetric(vertical=10),
                         ),
                     ),
                     ft.OutlinedButton(
@@ -283,7 +283,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
                             color=C_ERROR,
                             side=ft.BorderSide(1, C_ERROR),
                             shape=ft.RoundedRectangleBorder(radius=10),
-                            padding=ft.padding.symmetric(vertical=10),
+                            padding=ft.Padding.symmetric(vertical=10),
                         ),
                     ),
                 ],
@@ -334,7 +334,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
                             ft.Text(user["nom"], size=16, weight=ft.FontWeight.W_600, color=C_TEXT),
                             ft.Text(f"@{user['username']}", size=13, color=C_MUTED),
                             ft.Container(
-                                padding=ft.padding.symmetric(horizontal=8, vertical=3),
+                                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
                                 border_radius=20,
                                 bgcolor="#E8F5E9" if user["role"] == "admin" else "#EDE7F6",
                                 content=ft.Text(
@@ -356,7 +356,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
                     style=ft.ButtonStyle(
                         bgcolor=C_ERROR, color=ft.Colors.WHITE,
                         shape=ft.RoundedRectangleBorder(radius=10),
-                        padding=ft.padding.symmetric(vertical=10),
+                        padding=ft.Padding.symmetric(vertical=10),
                     ),
                 )
             ]),
@@ -381,7 +381,7 @@ def build_settings_view(page: ft.Page, session: dict, navigate) -> ft.View:
         ),
         controls=[
             ft.Container(
-                padding=ft.padding.symmetric(horizontal=14, vertical=14),
+                padding=ft.Padding.symmetric(horizontal=14, vertical=14),
                 content=ft.Column(
                     spacing=14,
                     controls=[

@@ -96,7 +96,7 @@ def build_liste_view(page: ft.Page, session: dict, navigate) -> ft.View:
             content=ft.Container(
                 bgcolor=C_SURFACE,
                 border_radius=12,
-                padding=ft.padding.symmetric(horizontal=14, vertical=12),
+                padding=ft.Padding.symmetric(horizontal=14, vertical=12),
                 content=ft.Column(
                     spacing=6,
                     controls=[
@@ -108,7 +108,7 @@ def build_liste_view(page: ft.Page, session: dict, navigate) -> ft.View:
                                 ft.Container(
                                     bgcolor="#E8F5E9",
                                     border_radius=8,
-                                    padding=ft.padding.symmetric(horizontal=10, vertical=4),
+                                    padding=ft.Padding.symmetric(horizontal=10, vertical=4),
                                     content=ft.Text(f"{montant:.2f}", color=C_DARK,
                                                     weight=ft.FontWeight.BOLD, size=14),
                                 ),
@@ -268,7 +268,7 @@ def build_liste_view(page: ft.Page, session: dict, navigate) -> ft.View:
         elevation=4,
         content=ft.Container(
             border_radius=14,
-            padding=ft.padding.symmetric(horizontal=20, vertical=18),
+            padding=ft.Padding.symmetric(horizontal=20, vertical=18),
             gradient=ft.LinearGradient(
                 begin=ft.Alignment.TOP_LEFT,
                 end=ft.Alignment.BOTTOM_RIGHT,
@@ -331,7 +331,7 @@ def build_liste_view(page: ft.Page, session: dict, navigate) -> ft.View:
                                 bgcolor=C_PRIMARY,
                                 color=ft.Colors.WHITE,
                                 shape=ft.RoundedRectangleBorder(radius=10),
-                                padding=ft.padding.symmetric(vertical=12),
+                                padding=ft.Padding.symmetric(vertical=12),
                             ),
                         )
                     ]),
@@ -375,7 +375,7 @@ def build_liste_view(page: ft.Page, session: dict, navigate) -> ft.View:
                         bgcolor=C_PURPLE,
                         color=ft.Colors.WHITE,
                         shape=ft.RoundedRectangleBorder(radius=10),
-                        padding=ft.padding.symmetric(vertical=12),
+                        padding=ft.Padding.symmetric(vertical=12),
                     ),
                 )
             ]),
@@ -389,7 +389,7 @@ def build_liste_view(page: ft.Page, session: dict, navigate) -> ft.View:
             ft.DecorationImage(src=wallpaper, fit=ft.BoxFit.COVER, opacity=0.18)
             if use_wallpaper else None
         ),
-        padding=ft.padding.symmetric(horizontal=14, vertical=12),
+        padding=ft.Padding.symmetric(horizontal=14, vertical=12),
         content=main_column,
     )
 

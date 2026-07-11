@@ -1,2 +1,2 @@
-flet
+flet==0.82.2
 reportlab

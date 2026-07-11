@@ -58,7 +58,7 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
                         style=ft.ButtonStyle(
                             bgcolor=C_PRIMARY, color=ft.Colors.WHITE,
                             shape=ft.RoundedRectangleBorder(radius=8),
-                            padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                            padding=ft.Padding.symmetric(horizontal=12, vertical=8),
                         ),
                         on_click=lambda e, uid=u["id"]: _approve(uid, True),
                     )
@@ -72,7 +72,7 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
                             color=C_WARNING,
                             side=ft.BorderSide(1, C_WARNING),
                             shape=ft.RoundedRectangleBorder(radius=8),
-                            padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                            padding=ft.Padding.symmetric(horizontal=12, vertical=8),
                         ),
                         on_click=lambda e, uid=u["id"]: _approve(uid, False),
                     )
@@ -127,7 +127,7 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
                                     horizontal_alignment=ft.CrossAxisAlignment.END,
                                     controls=[
                                         ft.Container(
-                                            padding=ft.padding.symmetric(horizontal=8, vertical=3),
+                                            padding=ft.Padding.symmetric(horizontal=8, vertical=3),
                                             border_radius=20,
                                             bgcolor="#EDE7F6" if u["role"] == "admin" else "#E8F5E9",
                                             content=ft.Text(
@@ -138,7 +138,7 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
                                             ),
                                         ),
                                         ft.Container(
-                                            padding=ft.padding.symmetric(horizontal=8, vertical=3),
+                                            padding=ft.Padding.symmetric(horizontal=8, vertical=3),
                                             border_radius=20,
                                             bgcolor="#FFF3E0" if not approved else "#E8F5E9",
                                             content=ft.Text(
@@ -366,7 +366,7 @@ def build_admin_view(page: ft.Page, session: dict, navigate) -> ft.View:
         ),
         controls=[
             ft.Container(
-                padding=ft.padding.symmetric(horizontal=14, vertical=14),
+                padding=ft.Padding.symmetric(horizontal=14, vertical=14),
                 content=ft.Column(
                     spacing=16,
                     controls=[

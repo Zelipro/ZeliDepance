@@ -65,7 +65,7 @@ def build_login_view(page: ft.Page, session: dict, navigate) -> ft.View:
                 controls=[
                     # Header degrade vert
                     ft.Container(
-                        padding=ft.padding.symmetric(vertical=48, horizontal=24),
+                        padding=ft.Padding.symmetric(vertical=48, horizontal=24),
                         gradient=ft.LinearGradient(
                             begin=ft.Alignment.TOP_CENTER,
                             end=ft.Alignment.BOTTOM_CENTER,
@@ -92,7 +92,7 @@ def build_login_view(page: ft.Page, session: dict, navigate) -> ft.View:
                     ),
                     # Formulaire de connexion
                     ft.Container(
-                        padding=ft.padding.symmetric(horizontal=24, vertical=32),
+                        padding=ft.Padding.symmetric(horizontal=24, vertical=32),
                         content=ft.Column(
                             spacing=16,
                             controls=[
@@ -116,7 +116,7 @@ def build_login_view(page: ft.Page, session: dict, navigate) -> ft.View:
                                             bgcolor=C_PRIMARY,
                                             color=ft.Colors.WHITE,
                                             shape=ft.RoundedRectangleBorder(radius=12),
-                                            padding=ft.padding.symmetric(vertical=14),
+                                            padding=ft.Padding.symmetric(vertical=14),
                                         ),
                                     )
                                 ]),
