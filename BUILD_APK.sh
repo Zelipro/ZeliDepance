@@ -59,6 +59,20 @@ else
     SKIP_PATCH=false
 fi
 
+# ── ÉTAPE 0 : Nettoyage du cache de build ─────────────────────────────────────
+# flet build apk decide de reutiliser ou non les paquets Python deja empaquetes
+# pour Android en comparant un hash des ARGUMENTS de la commande, pas le
+# contenu de requirements.txt : modifier ce fichier seul ne suffit donc pas a
+# declencher un reel reinstallation. Meme --clear-cache ne nettoie pas ce
+# cache-la (il ne touche que le squelette Flutter). Seule la suppression
+# complete de build/ garantit que les dependances Python reellement listees
+# dans requirements.txt sont celles qui finissent dans l'APK.
+if [ -d "build" ]; then
+    echo "🧹 Suppression de build/ (cache de paquets Python potentiellement obsolete)..."
+    rm -rf build
+    echo ""
+fi
+
 # ── ÉTAPE 1 : Build initial ───────────────────────────────────────────────────
 echo "┌─────────────────────────────────────────────────────────────┐"
 echo "│  ÉTAPE 1/3 — Premier build APK                              │"
